@@ -7,9 +7,6 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App.tsx";
 import "./index.css";
 
-// Optional: only import if you have a valid v3 theme/system
-// import { system } from './theme.ts'
-
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
