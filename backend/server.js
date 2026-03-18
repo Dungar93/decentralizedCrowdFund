@@ -34,7 +34,10 @@ const mongoUri = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/medtrust"
 mongoose
   .connect(mongoUri)
   .then(() => console.log("✅ MongoDB connected"))
-  .catch((err) => console.error("❌ MongoDB connection error:", err));
+  .catch((err) => {
+    console.warn("⚠️  MongoDB connection pending:", err.message);
+    console.log("📝 Server will start anyway - some features may not work until MongoDB is available");
+  });
 
 // File upload configuration
 const uploadsDir = path.join(__dirname, "../uploads");

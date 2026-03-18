@@ -47,13 +47,12 @@ const AuditLogSchema = new mongoose.Schema({
   
   errorMessage: String,
   
-  timestamp: { type: Date, default: Date.now, index: true },
+  timestamp: { type: Date, default: Date.now },
   
   // TTL index for 5-year retention (5 years = 157,680,000 seconds)
   expiresAt: {
     type: Date,
     default: () => new Date(Date.now() + 5 * 365 * 24 * 60 * 60 * 1000),
-    index: true,
   },
 });
 
