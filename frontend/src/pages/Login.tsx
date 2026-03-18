@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import './Auth.css';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -66,16 +65,24 @@ export default function Login() {
   };
 
   return (
-    <div className="auth-container">
-      <div className="auth-card">
-        <h1>Welcome Back</h1>
-        <p className="auth-subtitle">Login to your MedTrustFund account</p>
+    <div className="min-h-screen bg-gradient-to-br from-purple-600 to-purple-900 flex items-center justify-center px-4 py-12">
+      <div className="w-full max-w-md bg-white rounded-lg shadow-xl p-8 space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Welcome Back</h1>
+          <p className="text-gray-600 mt-2">Login to your MedTrustFund account</p>
+        </div>
 
-        {error && <div className="error-message">{error}</div>}
+        {error && (
+          <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded">
+            <p className="text-red-700 text-sm">{error}</p>
+          </div>
+        )}
 
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label>Email Address</label>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Email Address
+            </label>
             <input
               type="email"
               name="email"
@@ -84,11 +91,14 @@ export default function Login() {
               placeholder="your@email.com"
               required
               autoFocus
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 focus:border-transparent transition"
             />
           </div>
 
-          <div className="form-group">
-            <label>Password</label>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Password
+            </label>
             <input
               type="password"
               name="password"
@@ -96,37 +106,60 @@ export default function Login() {
               onChange={handleChange}
               placeholder="Your password"
               required
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 focus:border-transparent transition"
             />
           </div>
 
-          <div className="form-group-checkbox">
+          <div className="flex items-center">
             <input
               type="checkbox"
               id="rememberMe"
               name="rememberMe"
               checked={formData.rememberMe}
               onChange={handleChange}
+              className="w-4 h-4 text-purple-600 rounded focus:ring-2 focus:ring-purple-600 cursor-pointer"
             />
-            <label htmlFor="rememberMe">Remember me</label>
+            <label htmlFor="rememberMe" className="ml-2 text-sm text-gray-600 cursor-pointer">
+              Remember me
+            </label>
           </div>
 
-          <button type="submit" className="auth-button" disabled={loading}>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-2 px-4 bg-gradient-to-r from-purple-600 to-purple-900 text-white font-semibold rounded-lg hover:shadow-lg transform hover:-translate-y-0.5 transition duration-200 disabled:opacity-70 disabled:cursor-not-allowed"
+          >
             {loading ? 'Logging in...' : 'Login'}
           </button>
         </form>
 
-        <p className="auth-footer">
-          Don't have an account? <a href="/signup">Sign up here</a>
+        <p className="text-center text-sm text-gray-600">
+          Don't have an account?{' '}
+          <a href="/signup" className="text-purple-600 font-semibold hover:text-purple-700">
+            Sign up here
+          </a>
         </p>
 
-        <div className="divider">or</div>
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-gray-300"></div>
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="px-2 bg-white text-gray-500">or</span>
+          </div>
+        </div>
 
-        <button className="wallet-button">
+        <button
+          type="button"
+          className="w-full py-2 px-4 bg-gray-50 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-100 transition"
+        >
           🔗 Connect Wallet
         </button>
 
-        <p className="help-link">
-          <a href="/forgot-password">Forgot your password?</a>
+        <p className="text-center text-sm text-gray-600">
+          <a href="/forgot-password" className="text-purple-600 hover:text-purple-700">
+            Forgot your password?
+          </a>
         </p>
       </div>
     </div>

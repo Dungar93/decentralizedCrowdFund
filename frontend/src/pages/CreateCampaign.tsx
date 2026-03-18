@@ -1,232 +1,138 @@
 import { useState } from "react";
-import {
-  Box,
-  Button,
-  FormControl,
-  FormErrorMessage,
-  FormLabel,
-  Heading,
-  Input,
-  Textarea,
-  VStack,
-  useToast,
-  Progress,
-  Text,
-  Alert,
-  AlertIcon,
-  HStack,
-  Badge,
-} from "@chakra-ui/react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import * as z from "zod";
-import { useMutation } from "@tanstack/react-query";
-import api from "@/services/api";
-import FileUploader from "@/components/ui/FileUploader";
-import RiskScoreBadge from "@/components/ui/RiskScoreBadge";
-
-const schema = z.object({
-  title: z.string().min(8, "Title must be at least 8 characters"),
-  description: z.string().min(50, "Please provide more details"),
-  patientAddress: z
-    .string()
-    .regex(/^0x[a-fA-F0-9]{40}$/, "Invalid Ethereum address"),
-  hospitalAddress: z
-    .string()
-    .regex(/^0x[a-fA-F0-9]{40}$/, "Invalid Ethereum address"),
-  goalAmount: z.string().regex(/^\d+(\.\d+)?$/, "Must be a valid number"),
-});
-
-type FormData = z.infer<typeof schema>;
+import { useNavigate } from "react-router-dom";
 
 export default function CreateCampaign() {
-  const [files, setFiles] = useState<File[]>([]);
-  const [verificationResult, setVerificationResult] = useState<any>(null);
-  const [uploading, setUploading] = useState(false);
-  const toast = useToast();
-
-  const {
-    register,
-    handleSubmit,
-    formState: { errors, isSubmitting },
-  } = useForm<FormData>({
-    resolver: zodResolver(schema),
+  const navigate = useNavigate();
+  const [formData, setFormData] = useState({
+    title: "",
+    description: "",
+    goalAmount: "",
+    patientAddress: "",
+    hospitalAddress: "",
   });
 
-  const verifyMutation = useMutation({
-    mutationFn: async (formFiles: File[]) => {
-      const fd = new FormData();
-      formFiles.forEach((file) => fd.append("documents", file));
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
 
-      const res = await fetch("http://localhost:8001/verify", {
-        method: "POST",
-        body: fd,
-      });
-
-      if (!res.ok) throw new Error("Verification service unavailable");
-      return res.json();
-    },
-    onSuccess: (data) => {
-      setVerificationResult(data);
-      toast({
-        title: data.verdict,
-        description: `Risk score: ${data.riskScore}/100`,
-        status:
-          data.riskScore < 40
-            ? "success"
-            : data.riskScore < 70
-              ? "warning"
-              : "error",
-        duration: 8000,
-      });
-    },
-    onError: () => {
-      toast({ title: "Verification failed", status: "error" });
-    },
-  });
-
-  const createMutation = useMutation({
-    mutationFn: (data: FormData & { riskScore: number }) =>
-      api.post("/campaigns", data),
-    onSuccess: (res) => {
-      toast({
-        title: "Campaign launched!",
-        description: `Contract address: ${res.data.contractAddress}`,
-        status: "success",
-      });
-      // reset form or redirect
-    },
-  });
-
-  const onSubmit = (data: FormData) => {
-    if (!verificationResult || verificationResult.riskScore > 60) {
-      toast({
-        title: "Document verification required or too risky",
-        status: "warning",
-      });
-      return;
-    }
-    createMutation.mutate({ ...data, riskScore: verificationResult.riskScore });
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    alert("Campaign creation feature coming in Phase 3!");
+    // TODO: Implement campaign creation API
   };
 
   return (
-    <Box maxW="container.md" mx="auto" py={10}>
-      <Heading mb={8}>Create Medical Crowdfunding Campaign</Heading>
+    <div className="min-h-screen bg-gray-50 py-12 px-4">
+      <div className="max-w-2xl mx-auto bg-white rounded-lg shadow-md p-8">
+        <h1 className="text-3xl font-bold text-gray-900 mb-8">
+          Create Medical Crowdfunding Campaign
+        </h1>
 
-      <form onSubmit={handleSubmit(onSubmit)}>
-        <VStack spacing={6} align="stretch">
-          <FormControl isInvalid={!!errors.title}>
-            <FormLabel>Campaign Title</FormLabel>
-            <Input
-              {...register("title")}
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Campaign Title
+            </label>
+            <input
+              type="text"
+              name="title"
+              value={formData.title}
+              onChange={handleChange}
               placeholder="Urgent heart surgery for 12-year-old"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600"
+              required
             />
-            <FormErrorMessage>{errors.title?.message}</FormErrorMessage>
-          </FormControl>
+          </div>
 
-          <FormControl isInvalid={!!errors.description}>
-            <FormLabel>Description & Medical Need</FormLabel>
-            <Textarea
-              {...register("description")}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Description & Medical Need
+            </label>
+            <textarea
+              name="description"
+              value={formData.description}
+              onChange={handleChange}
               rows={6}
-              placeholder="Detailed story..."
-            />
-            <FormErrorMessage>{errors.description?.message}</FormErrorMessage>
-          </FormControl>
+              placeholder="Detailed story of medical need..."
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600"
+              required
+            ></textarea>
+          </div>
 
-          <HStack spacing={6} align="start">
-            <FormControl isInvalid={!!errors.patientAddress}>
-              <FormLabel>
-                Patient Ethereum Address (for receiving funds)
-              </FormLabel>
-              <Input {...register("patientAddress")} placeholder="0x..." />
-              <FormErrorMessage>
-                {errors.patientAddress?.message}
-              </FormErrorMessage>
-            </FormControl>
-
-            <FormControl isInvalid={!!errors.hospitalAddress}>
-              <FormLabel>
-                Hospital Ethereum Address (for milestone confirmation)
-              </FormLabel>
-              <Input {...register("hospitalAddress")} placeholder="0x..." />
-              <FormErrorMessage>
-                {errors.hospitalAddress?.message}
-              </FormErrorMessage>
-            </FormControl>
-          </HStack>
-
-          <FormControl isInvalid={!!errors.goalAmount}>
-            <FormLabel>Goal Amount (ETH)</FormLabel>
-            <Input {...register("goalAmount")} placeholder="2.5" />
-            <FormErrorMessage>{errors.goalAmount?.message}</FormErrorMessage>
-          </FormControl>
-
-          <Box>
-            <FormLabel>Upload Medical Documents (PDF, JPG, PNG)</FormLabel>
-            <FileUploader
-              onFilesChange={setFiles}
-              maxFiles={5}
-              accept="image/*,application/pdf"
-              isDisabled={verifyMutation.isPending}
-            />
-          </Box>
-
-          <Button
-            colorScheme="blue"
-            onClick={() => files.length > 0 && verifyMutation.mutate(files)}
-            isLoading={verifyMutation.isPending}
-            isDisabled={files.length === 0 || verifyMutation.isPending}
-          >
-            Verify Documents
-          </Button>
-
-          {verificationResult && (
-            <Alert
-              status={
-                verificationResult.riskScore < 40
-                  ? "success"
-                  : verificationResult.riskScore < 70
-                    ? "warning"
-                    : "error"
-              }
-              variant="subtle"
-              flexDirection="column"
-              alignItems="center"
-              justifyContent="center"
-              textAlign="center"
-              py={6}
-            >
-              <AlertIcon boxSize={10} />
-              <Text fontSize="xl" mt={4} fontWeight="bold">
-                {verificationResult.verdict}
-              </Text>
-              <RiskScoreBadge
-                score={verificationResult.riskScore}
-                mt={4}
-                size="lg"
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                Patient Ethereum Address
+              </label>
+              <input
+                type="text"
+                name="patientAddress"
+                value={formData.patientAddress}
+                onChange={handleChange}
+                placeholder="0x..."
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600"
+                required
               />
-              <Text mt={2} fontSize="sm" opacity={0.9}>
-                {verificationResult.details?.join(" • ")}
-              </Text>
-            </Alert>
-          )}
+            </div>
 
-          <Button
-            type="submit"
-            colorScheme="brand"
-            size="lg"
-            isLoading={createMutation.isPending || isSubmitting}
-            isDisabled={
-              !verificationResult ||
-              verificationResult.riskScore > 60 ||
-              createMutation.isPending
-            }
-          >
-            Launch Campaign
-          </Button>
-        </VStack>
-      </form>
-    </Box>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                Hospital Ethereum Address
+              </label>
+              <input
+                type="text"
+                name="hospitalAddress"
+                value={formData.hospitalAddress}
+                onChange={handleChange}
+                placeholder="0x..."
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600"
+                required
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Goal Amount (ETH)
+            </label>
+            <input
+              type="text"
+              name="goalAmount"
+              value={formData.goalAmount}
+              onChange={handleChange}
+              placeholder="2.5"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600"
+              required
+            />
+          </div>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <p className="text-sm text-blue-800">
+              📄 Document upload and AI verification coming in Phase 3!
+            </p>
+          </div>
+
+          <div className="flex gap-4">
+            <button
+              type="submit"
+              className="flex-1 py-2 px-4 bg-gradient-to-r from-purple-600 to-purple-900 text-white font-semibold rounded-lg hover:shadow-lg transition"
+            >
+              Create Campaign
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate("/dashboard")}
+              className="flex-1 py-2 px-4 bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }

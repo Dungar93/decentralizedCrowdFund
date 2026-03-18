@@ -1,13 +1,5 @@
+import { useState } from "react";
 import { useDropzone } from "react-dropzone";
-import {
-  Box,
-  Text,
-  Icon,
-  VStack,
-  Badge,
-  HStack,
-  Button,
-} from "@chakra-ui/react";
 import { FiUploadCloud, FiX } from "react-icons/fi";
 
 interface Props {
@@ -43,72 +35,55 @@ export default function FileUploader({
   };
 
   return (
-    <Box>
-      <Box
+    <div>
+      <div
         {...getRootProps()}
-        border="2px dashed"
-        borderColor={isDragActive ? "brand.500" : "gray.300"}
-        borderRadius="lg"
-        p={10}
-        textAlign="center"
-        bg={isDragActive ? "brand.50" : "gray.50"}
-        _dark={{
-          bg: isDragActive ? "brand.900" : "gray.800",
-          borderColor: isDragActive ? "brand.400" : "gray.600",
-        }}
-        cursor={isDisabled ? "not-allowed" : "pointer"}
-        opacity={isDisabled ? 0.6 : 1}
+        className={`border-2 border-dashed rounded-lg p-10 text-center transition cursor-pointer ${
+          isDragActive
+            ? "border-purple-500 bg-purple-50"
+            : "border-gray-300 bg-gray-50"
+        } ${isDisabled ? "opacity-60 cursor-not-allowed" : ""}`}
       >
         <input {...getInputProps()} />
-        <VStack spacing={3}>
-          <Icon as={FiUploadCloud} boxSize={10} color="gray.500" />
-          <Text fontWeight="medium">
+        <div className="space-y-3">
+          <FiUploadCloud className="mx-auto h-10 w-10 text-gray-500" />
+          <p className="font-medium">
             {isDragActive
               ? "Drop files here..."
               : "Drag & drop documents or click to select"}
-          </Text>
-          <Text fontSize="sm" color="gray.500">
+          </p>
+          <p className="text-sm text-gray-500">
             PDF, JPG, PNG • Max {maxFiles} files
-          </Text>
-        </VStack>
-      </Box>
+          </p>
+        </div>
+      </div>
 
       {files.length > 0 && (
-        <Box mt={6}>
-          <Text fontWeight="medium" mb={2}>
-            Uploaded files:
-          </Text>
-          <VStack align="stretch" spacing={2}>
+        <div className="mt-6">
+          <p className="font-medium mb-2">Uploaded files:</p>
+          <div className="space-y-2">
             {files.map((file, idx) => (
-              <HStack
+              <div
                 key={idx}
-                justify="space-between"
-                p={3}
-                bg="gray.100"
-                borderRadius="md"
-                _dark={{ bg: "gray.700" }}
+                className="flex justify-between items-center p-3 bg-gray-100 rounded-md"
               >
-                <Text isTruncated maxW="80%">
-                  {file.name}
-                </Text>
-                <HStack>
-                  <Badge colorScheme="blue">
+                <p className="truncate max-w-xs">{file.name}</p>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs bg-blue-200 text-blue-800 px-2 py-1 rounded">
                     {(file.size / 1024).toFixed(1)} KB
-                  </Badge>
-                  <Button
-                    size="xs"
-                    colorScheme="red"
-                    variant="ghost"
+                  </span>
+                  <button
                     onClick={() => removeFile(idx)}
+                    className="text-red-600 hover:text-red-800 transition"
                   >
-                    <Icon as={FiX} />
-                  </Button>
-                </HStack>
-              </HStack>
+                    <FiX />
+                  </button>
+                </div>
+              </div>
             ))}
-          </VStack>
-        </Box>
+          </div>
+        </div>
       )}
-    </Box>
+    </div>
   );
 }
