@@ -3,6 +3,7 @@ const Campaign = require('../models/Campaign');
 const RiskAssessment = require('../models/RiskAssessment');
 const Donation = require('../models/Donation');
 const AuditLog = require('../models/AuditLog');
+const SmartContract = require('../models/SmartContract');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth');
 const { ethers } = require('ethers');
 const axios = require('axios');
@@ -10,6 +11,13 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const {
+  deployEscrowContract,
+  getContractInstance,
+  confirmMilestoneOnChain,
+  releaseMilestoneOnChain,
+  getContractBalance,
+} = require('../utils/contractUtils');
 
 const router = express.Router();
 
@@ -359,7 +367,9 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 // @access  Private (Admin only)
 router.post('/:id/deploy-contract', authMiddleware, roleMiddleware(['admin']), async (req, res) => {
   try {
-    const campaign = await Campaign.findById(req.params.id);
+    const campaign = await Campaign.findById(req.params.id)
+      .populate('patientId')
+      .populate('hospitalId');
 
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' });
@@ -369,47 +379,55 @@ router.post('/:id/deploy-contract', authMiddleware, roleMiddleware(['admin']), a
       return res.status(400).json({ error: 'Smart contract already deployed for this campaign' });
     }
 
-    // Connect to blockchain
-    const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || 'http://127.0.0.1:8545');
-    const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
-
-    // Get hospital wallet address
-    const hospital = await User.findById(campaign.hospitalId);
-    if (!hospital || !hospital.walletAddress) {
-      return res.status(400).json({ error: 'Hospital wallet address not found' });
+    if (!campaign.milestones || campaign.milestones.length === 0) {
+      return res.status(400).json({ error: 'Campaign must have milestones to deploy contract' });
     }
 
-    // Prepare milestone data
-    const descriptions = campaign.milestones.map(m => m.description);
-    const amounts = campaign.milestones.map(m => ethers.parseEther(m.targetAmount.toString()));
+    // Get patient wallet address
+    const patientWallet = campaign.patientId?.walletAddress;
+    if (!patientWallet) {
+      return res.status(400).json({ error: 'Patient wallet address not found. Please connect wallet first.' });
+    }
 
-    // Deploy contract (using factory pattern - would need compiled ABI)
-    // For now, this is a placeholder - actual deployment requires compiled contract
-    const contractFactory = new ethers.ContractFactory(
-      // ABI would be imported from hardhat artifacts
-      [], // Placeholder
-      [], // Placeholder bytecode
-      wallet
+    // Get hospital wallet address
+    const hospitalWallet = campaign.hospitalId?.walletAddress;
+    if (!hospitalWallet) {
+      return res.status(400).json({ error: 'Hospital wallet address not found. Please assign a verified hospital.' });
+    }
+
+    console.log(`Deploying contract for campaign: ${campaign._id}`);
+    console.log(`Patient: ${patientWallet}, Hospital: ${hospitalWallet}`);
+
+    // Deploy the smart contract
+    const deploymentResult = await deployEscrowContract(
+      patientWallet,
+      hospitalWallet,
+      campaign.milestones
     );
 
-    // In production, load from hardhat artifacts:
-    // const artifact = require('../../hardhat/artifacts/contracts/MedTrustFundEscrow.sol/MedTrustFundEscrow.json');
-
-    // Placeholder - actual deployment
-    const contract = await contractFactory.deploy(
-      wallet.address, // patient (using deployer as placeholder)
-      hospital.walletAddress, // hospital
-      descriptions,
-      amounts
-    );
-
-    await contract.waitForDeployment();
-    const contractAddress = await contract.getAddress();
-
-    // Update campaign
-    campaign.smartContractAddress = contractAddress;
+    // Update campaign with contract details
+    campaign.smartContractAddress = deploymentResult.contractAddress;
+    campaign.smartContractDeploymentTx = deploymentResult.transactionHash;
     campaign.status = 'active';
     await campaign.save();
+
+    // Create smart contract record
+    await SmartContract.create({
+      campaignId: campaign._id,
+      contractAddress: deploymentResult.contractAddress,
+      transactionHash: deploymentResult.transactionHash,
+      network: process.env.RPC_URL?.includes('polygon') ? 'polygon' : 'hardhat',
+      patientAddress: patientWallet,
+      hospitalAddress: hospitalWallet,
+      milestones: campaign.milestones.map(m => ({
+        description: m.description,
+        amount: m.targetAmount,
+        confirmed: false,
+        releasedAt: null,
+      })),
+      status: 'active',
+      abi: deploymentResult.abi,
+    });
 
     // Create audit log
     await AuditLog.create({
@@ -417,17 +435,38 @@ router.post('/:id/deploy-contract', authMiddleware, roleMiddleware(['admin']), a
       action: 'smart_contract_deployed',
       entityType: 'campaign',
       entityId: campaign._id,
-      details: { contractAddress, transactionHash: contract.deploymentTransaction().hash },
+      details: {
+        contractAddress: deploymentResult.contractAddress,
+        transactionHash: deploymentResult.transactionHash,
+        milestoneCount: campaign.milestones.length,
+      },
       status: 'success',
     });
 
+    console.log(`✅ Contract deployed at: ${deploymentResult.contractAddress}`);
+
     res.json({
       message: 'Smart contract deployed successfully',
-      contractAddress,
-      transactionHash: contract.deploymentTransaction().hash,
+      contractAddress: deploymentResult.contractAddress,
+      transactionHash: deploymentResult.transactionHash,
+      network: process.env.RPC_URL || 'http://127.0.0.1:8545',
     });
   } catch (error) {
     console.error('Contract deployment error:', error);
+
+    // Handle specific errors
+    if (error.message.includes('artifact not found')) {
+      return res.status(500).json({
+        error: 'Contract compilation required. Run: cd hardhat && npx hardhat compile',
+      });
+    }
+
+    if (error.message.includes('PRIVATE_KEY')) {
+      return res.status(500).json({
+        error: 'Blockchain not configured. Set PRIVATE_KEY in .env file.',
+      });
+    }
+
     res.status(500).json({ error: `Failed to deploy smart contract: ${error.message}` });
   }
 });
