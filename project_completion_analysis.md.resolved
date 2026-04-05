@@ -1,0 +1,134 @@
+# MedTrustFund — Project Completion Analysis
+
+## Overall Estimate: ~75-80% Complete
+
+The core infrastructure is solid. Most remaining work is in **testing, polish, and a few missing integrations**.
+
+---
+
+## ✅ What's DONE (Fully/Mostly Implemented)
+
+### Sprint 1: Core Infrastructure — ✅ ~95% Done
+| Feature | Status | Notes |
+|---|---|---|
+| User Auth (Register/Login) | ✅ Done | JWT-based, [auth.js](file:///home/dungar/decentralizedCrowdFund/backend/routes/auth.js) |
+| RBAC (Patient/Donor/Hospital/Admin) | ✅ Done | [roleMiddleware](file:///home/dungar/decentralizedCrowdFund/backend/middleware/auth.js#25-46) in [auth.js](file:///home/dungar/decentralizedCrowdFund/backend/middleware/auth.js) |
+| Database Schema (6 models) | ✅ Done | `User`, `Campaign`, `Donation`, `RiskAssessment`, `SmartContract`, `AuditLog` |
+| Campaign CRUD | ✅ Done | Full create/read/update/delete in [campaigns.js](file:///home/dungar/decentralizedCrowdFund/backend/routes/campaigns.js) |
+| Frontend Pages (18 pages) | ✅ Done | Home, Campaigns, CreateCampaign, Dashboard, Login, SignUp, AdminDashboard, etc. |
+
+### Sprint 2: Trust Layer (AI) — ✅ ~85% Done
+| Feature | Status | Notes |
+|---|---|---|
+| OCR Text Extraction (PDF + Image) | ✅ Done | PyMuPDF + Tesseract in [main.py](file:///home/dungar/decentralizedCrowdFund/ai-service/main.py) |
+| Document Type Classification | ✅ Done | Identity, Diagnosis, Admission, Cost Estimate |
+| Image Tampering Detection | ✅ Done | File size, EXIF, resolution, compression checks |
+| AI-Generated Content Detection | ✅ Done | Heuristic analysis of text patterns |
+| Risk Score Computation (SRS v2.0 formula) | ✅ Done | `w1×Tampering + w2×AI + w3×Metadata` |
+| Risk Badges (Low/Medium/High) | ✅ Done | Auto-approve, escalate, or manual review |
+| Backend ↔ AI Integration | ✅ Done | Campaign creation calls `/verify` endpoint |
+
+### Sprint 3: Blockchain Layer — ✅ ~80% Done
+| Feature | Status | Notes |
+|---|---|---|
+| Smart Contract (Escrow) | ✅ Done | [MedTrustFundEscrow.sol](file:///home/dungar/decentralizedCrowdFund/hardhat/contracts/MedTrustFundEscrow.sol) — donate, confirm, release |
+| Contract Deployment API | ✅ Done | Admin deploys per campaign via `/deploy-contract` |
+| Donation via Smart Contract | ✅ Done | Both direct and tx-hash verification flows |
+| Transaction Verification | ✅ Done | On-chain receipt verification in [donations.js](file:///home/dungar/decentralizedCrowdFund/backend/routes/donations.js) |
+| Contract Utils | ✅ Done | [contractUtils.js](file:///home/dungar/decentralizedCrowdFund/backend/utils/contractUtils.js) |
+| Blockchain Indexer | ✅ Done | [indexer.js](file:///home/dungar/decentralizedCrowdFund/backend/utils/indexer.js) |
+
+### Sprint 4: Hospital & Admin — ✅ ~80% Done
+| Feature | Status | Notes |
+|---|---|---|
+| Milestone Confirm (Hospital) | ✅ Done | [milestones.js](file:///home/dungar/decentralizedCrowdFund/backend/routes/milestones.js) |
+| Milestone Fund Release | ✅ Done | On-chain + DB release |
+| Admin Dashboard (Stats) | ✅ Done | `/api/admin/dashboard` with aggregations |
+| Admin Campaign Review | ✅ Done | Approve/Reject/Request-more-info flow |
+| Admin User Management | ✅ Done | CRUD + KYC status update |
+| Audit Log System | ✅ Done | Comprehensive logging with middleware + export |
+| 5-Year Audit Export | ✅ Done | `/api/admin/audit-logs/export` |
+
+---
+
+## ⚠️ What's REMAINING (~20-25%)
+
+### 1. On-Chain Hospital Milestone Confirmation — 🔴 Partial
+The hospital milestone confirmation is **database-only** right now. The code explicitly says:
+```js
+onChainResult = {
+  databaseOnly: true,
+  note: 'On-chain confirmation requires hospital wallet signature',
+};
+```
+**Need:** Hospital must sign the `confirmMilestone()` transaction on the smart contract from their wallet.
+
+### 2. Frontend Wallet Integration (MetaMask) — 🟡 Partial
+- [web3.ts](file:///home/dungar/decentralizedCrowdFund/frontend/src/utils/web3.ts) exists but needs verification of:
+  - MetaMask connect flow working end-to-end
+  - Donor can send ETH to escrow contract from browser
+  - Hospital can confirm milestones from browser
+- The [CampaignDetail.tsx](file:///home/dungar/decentralizedCrowdFund/frontend/src/pages/CampaignDetail.tsx) page is large (28KB) but needs verification that the donate-via-MetaMask flow is functional.
+
+### 3. Smart Contract Refund Mechanism — 🔴 Missing
+The refund endpoint in [donations.js](file:///home/dungar/decentralizedCrowdFund/backend/routes/donations.js) says:
+```js
+// In production, this would trigger a smart contract refund
+// For now, update status
+donation.status = 'refunded';
+```
+**Need:** Add a `refund()` function to the Solidity contract and wire it up.
+
+### 4. Cross-Document Name Verification — 🟡 Incomplete
+The SRS requires: *"matching name on ID with medical report"*. The AI service does metadata consistency checks but does **not** extract and compare patient names across documents.
+
+### 5. Hospital Trust Weighting — 🔴 Missing
+The SRS specifies: *"Weighting based on hospital reputation/verification"*. The risk score formula does not currently factor in hospital verification status.
+
+### 6. Data Encryption at Rest — 🟡 Not Implemented
+SRS requires: *"Sensitive documents encrypted at rest"*. Currently, documents are stored as plain files in `/uploads`.
+
+### 7. Sprint 5: End-to-End Testing — 🔴 Not Done
+| Item | Status |
+|---|---|
+| Unit tests for AI service | ❌ Missing |
+| Unit tests for backend routes | ❌ Missing |
+| Integration tests (AI ↔ Backend ↔ Blockchain) | ❌ Missing |
+| Frontend component tests | ❌ Missing |
+| Security audit | ❌ Not done |
+| End-to-end user acceptance testing | ❌ Not done |
+
+> [!NOTE]
+> There are test files (`component-tests.js`, `test-suite.js`) in the project root, but these appear to be standalone scripts, not part of a proper test framework.
+
+### 8. Minor Missing Items
+| Item | Status |
+|---|---|
+| HIPAA/GDPR compliance headers | ❌ Missing |
+| Rate limiting on API endpoints | ❌ Missing |
+| Input sanitization (XSS protection) | ❌ Missing |
+| Production deployment config | ❌ Missing |
+| Environment-specific configs | 🟡 `.env.example` exists |
+
+---
+
+## Summary by Sprint
+
+| Sprint | Description | Completion |
+|---|---|---|
+| Sprint 1 | Core Infrastructure | **~95%** |
+| Sprint 2 | Trust Layer (AI) | **~85%** |
+| Sprint 3 | Blockchain Layer | **~80%** |
+| Sprint 4 | Hospital/Admin Portal | **~80%** |
+| Sprint 5 | Testing & Security | **~10%** |
+
+---
+
+## Priority Recommendations
+
+1. **High Priority:** Write tests (Sprint 5) — this is the biggest gap
+2. **High Priority:** Fix on-chain hospital milestone confirmation  
+3. **Medium Priority:** Add smart contract refund function
+4. **Medium Priority:** Complete MetaMask wallet integration end-to-end
+5. **Low Priority:** Cross-document name verification, hospital trust weighting
+6. **Low Priority:** Encryption at rest, HIPAA/GDPR compliance
