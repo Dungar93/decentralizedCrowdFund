@@ -4,6 +4,7 @@ const RiskAssessment = require('../models/RiskAssessment');
 const Donation = require('../models/Donation');
 const AuditLog = require('../models/AuditLog');
 const SmartContract = require('../models/SmartContract');
+const User = require('../models/User');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth');
 const { ethers } = require('ethers');
 const axios = require('axios');
@@ -18,6 +19,7 @@ const {
   releaseMilestoneOnChain,
   getContractBalance,
 } = require('../utils/contractUtils');
+const { encryptFile } = require('../utils/encryption');
 
 const router = express.Router();
 
@@ -77,12 +79,22 @@ router.post('/', authMiddleware, roleMiddleware(['patient']), upload.array('docu
     let riskAssessmentId = null;
     let campaignStatus = 'pending_verification';
 
+    let hospitalVerified = false;
+    if (hospitalId) {
+      const hospitalUser = await User.findById(hospitalId);
+      if (hospitalUser && hospitalUser.verified) {
+        hospitalVerified = true;
+      }
+    }
+
     if (req.files.length > 0) {
       try {
+        const FormData = require('form-data');
         const aiForm = new FormData();
         req.files.forEach((file) => {
           aiForm.append('files', fs.createReadStream(file.path));
         });
+        aiForm.append('hospital_verified', hospitalVerified ? 'true' : 'false');
 
         const aiRes = await axios.post('http://localhost:8001/verify', aiForm, {
           headers: aiForm.getHeaders(),
@@ -187,9 +199,13 @@ router.post('/', authMiddleware, roleMiddleware(['patient']), upload.array('docu
       status: 'success',
     });
 
-    // Clean up uploaded files
+    // Encrypt uploaded files at rest (HIPAA requirement)
     req.files.forEach((file) => {
-      fs.unlinkSync(file.path);
+      try {
+        encryptFile(file.path);
+      } catch (encErr) {
+        console.error('File encryption error:', encErr.message);
+      }
     });
 
     res.status(201).json({
@@ -416,7 +432,7 @@ router.post('/:id/deploy-contract', authMiddleware, roleMiddleware(['admin']), a
       campaignId: campaign._id,
       contractAddress: deploymentResult.contractAddress,
       transactionHash: deploymentResult.transactionHash,
-      network: process.env.RPC_URL?.includes('polygon') ? 'polygon' : 'hardhat',
+      network: process.env.RPC_URL?.includes('polygon') ? 'polygon' : 'sepolia',
       patientAddress: patientWallet,
       hospitalAddress: hospitalWallet,
       milestones: campaign.milestones.map(m => ({

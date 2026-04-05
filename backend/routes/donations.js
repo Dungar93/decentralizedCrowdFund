@@ -2,9 +2,10 @@ const express = require('express');
 const Donation = require('../models/Donation');
 const Campaign = require('../models/Campaign');
 const AuditLog = require('../models/AuditLog');
+const User = require('../models/User');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth');
 const { ethers } = require('ethers');
-const { getContractInstance } = require('../utils/contractUtils');
+const { getContractInstance, refundDonationOnChain } = require('../utils/contractUtils');
 
 const router = express.Router();
 
@@ -214,13 +215,37 @@ router.post('/:id/refund', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Donation already refunded' });
     }
 
-    // In production, this would trigger a smart contract refund
-    // For now, update status
+    const campaign = await Campaign.findById(donation.campaignId);
+    let onChainResult = null;
+
+    // Trigger smart contract refund if applicable
+    if (campaign && campaign.smartContractAddress && donation.transactionHash) {
+      try {
+        const donorUser = await User.findById(donation.donorId);
+        
+        if (!donorUser || !donorUser.walletAddress) {
+          return res.status(400).json({ error: 'Donor wallet address not found for on-chain refund.' });
+        }
+        
+        const amountInWei = ethers.parseEther(donation.amount.toString());
+        
+        onChainResult = await refundDonationOnChain(
+          campaign.smartContractAddress, 
+          donorUser.walletAddress, 
+          amountInWei
+        );
+      } catch (contractError) {
+        console.error('Smart contract refund error:', contractError);
+        return res.status(500).json({ error: 'Failed to process on-chain refund: ' + contractError.message });
+      }
+    }
+
+    // Update status in DB
     donation.status = 'refunded';
     await donation.save();
 
     // Update campaign raised amount
-    const campaign = await Campaign.findById(donation.campaignId);
+    // Note: campaign was fetched above
     if (campaign) {
       campaign.raisedAmount -= donation.amount;
       await campaign.save();
@@ -236,7 +261,7 @@ router.post('/:id/refund', authMiddleware, async (req, res) => {
       status: 'success',
     });
 
-    res.json({ message: 'Refund processed successfully', donation });
+    res.json({ message: 'Refund processed successfully', donation, onChainResult });
   } catch (error) {
     res.status(500).json({ error: `Failed to process refund: ${error.message}` });
   }
