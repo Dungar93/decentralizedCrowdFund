@@ -1,72 +1,246 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+@theme {
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
-body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
-}
-
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
-}
-
-@media (prefers-color-scheme: light) {
+@layer base {
   :root {
-    color: #213547;
-    background-color: #ffffff;
+    --bg-start: #0f172a;
+    --bg-end: #1e1b4b;
+    --glass-bg: rgba(255, 255, 255, 0.05);
+    --glass-border: rgba(255, 255, 255, 0.1);
+    --surface: rgba(0, 0, 0, 0.4);
+    --surface-hover: rgba(255, 255, 255, 0.08);
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --input-bg: rgba(15, 23, 42, 0.5);
+    --card-bg: rgba(255, 255, 255, 0.05);
+    --card-border: rgba(255, 255, 255, 0.1);
+    --scrollbar-track: rgba(15, 23, 42, 0.5);
+    --scrollbar-thumb: rgba(148, 163, 184, 0.2);
+    --scrollbar-thumb-hover: rgba(148, 163, 184, 0.4);
   }
-  a:hover {
-    color: #747bff;
+
+  .light {
+    --bg-start: #f8fafc;
+    --bg-end: #e0e7ff;
+    --glass-bg: rgba(255, 255, 255, 0.7);
+    --glass-border: rgba(0, 0, 0, 0.08);
+    --surface: rgba(255, 255, 255, 0.8);
+    --surface-hover: rgba(0, 0, 0, 0.03);
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #94a3b8;
+    --input-bg: rgba(241, 245, 249, 0.8);
+    --card-bg: rgba(255, 255, 255, 0.6);
+    --card-border: rgba(0, 0, 0, 0.08);
+    --scrollbar-track: rgba(241, 245, 249, 0.8);
+    --scrollbar-thumb: rgba(148, 163, 184, 0.3);
+    --scrollbar-thumb-hover: rgba(148, 163, 184, 0.5);
   }
-  button {
-    background-color: #f9f9f9;
+
+  body {
+    @apply m-0 min-h-screen font-sans antialiased bg-fixed;
+    color: var(--text-primary);
+    background-color: var(--bg-start);
+    background-image: radial-gradient(circle at top right, var(--bg-end), var(--bg-start) 60%);
+    transition: background-color 0.3s ease, color 0.3s ease;
   }
+}
+
+@layer utilities {
+  .glass-card {
+    background: var(--card-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--card-border);
+    box-shadow: 0 8px 32px 0 rgba(0,0,0,0.12);
+    transition: background 0.3s ease, border-color 0.3s ease;
+  }
+  
+  .glass-panel {
+    background: var(--surface);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--card-border);
+    transition: background 0.3s ease, border-color 0.3s ease;
+  }
+  
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-600;
+  }
+
+  .theme-text {
+    color: var(--text-primary);
+  }
+
+  .theme-text-secondary {
+    color: var(--text-secondary);
+  }
+
+  .theme-text-muted {
+    color: var(--text-muted);
+  }
+
+  .theme-input {
+    background: var(--input-bg);
+    border: 1px solid var(--card-border);
+    color: var(--text-primary);
+    transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+  }
+
+  .theme-surface {
+    background: var(--surface);
+    transition: background 0.3s ease;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LIGHT MODE OVERRIDES
+   Comprehensive overrides for all hardcoded dark-mode classes
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Home page root background ── */
+.light .bg-\[\#070514\] { background-color: #f8fafc !important; }
+
+/* ── Generic dark backgrounds → light ── */
+.light .bg-slate-950 { background-color: #f8fafc !important; }
+.light .bg-slate-900 { background-color: #f1f5f9 !important; }
+.light .bg-slate-800 { background-color: #e2e8f0 !important; }
+.light .bg-black { background-color: #f8fafc !important; }
+.light .bg-black\/20 { background: rgba(255,255,255,0.8) !important; }
+.light .bg-black\/30 { background: rgba(255,255,255,0.85) !important; }
+.light .bg-black\/40 { background: rgba(255,255,255,0.7) !important; }
+.light .bg-black\/50 { background: rgba(255,255,255,0.75) !important; }
+.light .bg-black\/60 { background: rgba(248,250,252,0.9) !important; }
+.light .bg-black\/80 { background: rgba(255,255,255,0.95) !important; }
+.light .bg-black\/90 { background: rgba(255,255,255,0.97) !important; }
+
+/* ── White-alpha backgrounds → subtle grey in light ── */
+.light .bg-white\/5 { background: rgba(0,0,0,0.02) !important; }
+.light .bg-white\/10 { background: rgba(0,0,0,0.04) !important; }
+.light .bg-white\/\[0\.03\] { background: rgba(0,0,0,0.02) !important; }
+
+/* ── Semi-transparent surface overrides ── */
+.light .bg-slate-900\/50 { background: rgba(248,250,252,0.9) !important; }
+
+/* ── Text colors ── */
+.light .text-white { color: #0f172a !important; }
+.light .text-slate-100 { color: #1e293b !important; }
+.light .text-slate-200 { color: #334155 !important; }
+.light .text-slate-300 { color: #475569 !important; }
+.light .text-slate-400 { color: #64748b !important; }
+.light .text-slate-500 { color: #94a3b8 !important; }
+.light .text-slate-600 { color: #475569 !important; }
+
+/* ── Keep CTA/badge text white even in light mode ── */
+.light .bg-gradient-to-r.from-fuchsia-600 .text-white,
+.light .bg-gradient-to-br.from-fuchsia-600 .text-white,
+.light [class*="bg-gradient-to"][class*="from-fuchsia"] .text-white,
+.light .bg-fuchsia-600 .text-white,
+.light .bg-indigo-600 .text-white,
+.light .bg-amber-500 .text-white,
+.light .bg-emerald-500 .text-white,
+.light button[class*="from-fuchsia-600"] { color: #ffffff !important; }
+
+/* ── Nav "Get Started" button stays white text ── */
+.light nav button[class*="from-fuchsia-600"] { color: #ffffff !important; }
+
+/* ── CTA section: keep inverted (white text on gradient) ── */
+.light section:has(.from-fuchsia-600) .text-white,
+.light section:has(.from-fuchsia-600) h2,
+.light section:has(.from-fuchsia-600) p { color: #ffffff !important; }
+
+/* ── Hero "Explore Campaigns" button text stays dark ── */
+.light .bg-white { background-color: #ffffff !important; }
+.light .text-slate-900 { color: #0f172a !important; }
+.light .text-indigo-900 { color: #312e81 !important; }
+
+/* ── Border overrides ── */
+.light .border-white\/5 { border-color: rgba(0,0,0,0.05) !important; }
+.light .border-white\/10 { border-color: rgba(0,0,0,0.06) !important; }
+.light .border-white\/15 { border-color: rgba(0,0,0,0.08) !important; }
+.light .border-white\/20 { border-color: rgba(0,0,0,0.1) !important; }
+
+/* ── Placeholder ── */
+.light .placeholder-slate-500::placeholder { color: #94a3b8 !important; }
+
+/* ── Shadows: softer in light mode ── */
+.light .shadow-2xl { box-shadow: 0 25px 50px -12px rgba(0,0,0,0.08) !important; }
+.light .shadow-xl { box-shadow: 0 20px 25px -5px rgba(0,0,0,0.06) !important; }
+.light .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0,0,0,0.05) !important; }
+
+/* ── Background gradient blobs: very faint in light ── */
+.light .blur-\[200px\] { opacity: 0.15 !important; }
+.light .blur-\[180px\] { opacity: 0.15 !important; }
+.light .blur-\[150px\] { opacity: 0.12 !important; }
+.light .blur-\[120px\] { opacity: 0.12 !important; }
+.light .blur-\[100px\] { opacity: 0.1 !important; }
+.light .blur-\[80px\] { opacity: 0.1 !important; }
+
+/* ── Noise texture overlay: hide in light mode ── */
+.light .mix-blend-overlay { opacity: 0.05 !important; }
+
+/* ── Gradient text: ensure still readable ── */
+.light .text-transparent { color: transparent !important; }
+
+/* ── Home page navbar: clean white glass ── */
+.light nav.fixed { 
+  background: rgba(255,255,255,0.85) !important; 
+  backdrop-filter: blur(20px) !important;
+  border-bottom-color: rgba(0,0,0,0.06) !important;
+}
+
+/* ── Footer ── */
+.light footer {
+  background: rgba(248,250,252,0.95) !important;
+  border-top-color: rgba(0,0,0,0.06) !important;
+}
+
+/* ── Input fields ── */
+.light input,
+.light textarea,
+.light select {
+  background: rgba(241,245,249,0.8) !important;
+  border-color: rgba(0,0,0,0.1) !important;
+  color: #0f172a !important;
+}
+
+/* ── Scrollbar ── */
+.light::-webkit-scrollbar-track { background: #f1f5f9 !important; }
+.light::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.3) !important; }
+
+/* ═══════════════════════════════════════════════════════════
+   SMOOTH THEME TRANSITIONS
+   ═══════════════════════════════════════════════════════════ */
+*, *::before, *::after {
+  transition-property: color, background-color, border-color, box-shadow, opacity;
+  transition-timing-function: ease;
+  transition-duration: 0.25s;
+}
+
+/* Don't break framer-motion or explicit transitions */
+[style*="transform"], [style*="opacity"] {
+  transition-property: color, background-color, border-color;
 }
