@@ -3,6 +3,10 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const path = require("path");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
+const mongoSanitize = require("express-mongo-sanitize");
+const xss = require("xss-clean");
 
 // Import routes
 const authRoutes = require("./routes/auth");
@@ -29,9 +33,22 @@ const app = express();
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(helmet()); // HIPAA/GDPR compliant HTTP security headers
+app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use(mongoSanitize()); // Prevent NoSQL injection
+app.use(xss()); // Sanitise user input against XSS
 app.use(auditLogMiddleware);
+
+// Rate limiting — 100 requests per 15 min per IP
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { error: 'Too many requests, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/', apiLimiter);
 
 // Static files for uploads
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));

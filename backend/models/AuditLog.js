@@ -23,11 +23,21 @@ const AuditLogSchema = new mongoose.Schema({
       'funds_released',
       'campaign_rejected',
       'admin_override',
+      'smart_contract_deployed',
+      'admin_campaign_review',
+      'admin_campaign_decision',
+      'admin_user_update',
+      'admin_user_deactivated',
+      'ai_verification_completed',
+      'campaign_deleted',
+      'donation_refunded',
+      'donation_created',
+      'api_call'
     ],
   },
   entityType: {
     type: String,
-    enum: ['user', 'campaign', 'donation', 'smart_contract', 'risk_assessment'],
+    enum: ['user', 'campaign', 'donation', 'smart_contract', 'risk_assessment', 'milestone'],
   },
   entityId: mongoose.Schema.Types.ObjectId,
   
