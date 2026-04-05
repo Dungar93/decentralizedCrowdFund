@@ -20,6 +20,7 @@ contract MedTrustFundEscrow {
     event Donated(address donor, uint256 amount);
     event MilestoneConfirmed(uint256 index);
     event FundsReleased(uint256 index, uint256 amount);
+    event Refunded(address donor, uint256 amount);
 
     constructor(
         address _patient,
@@ -62,6 +63,16 @@ contract MedTrustFundEscrow {
         payable(patient).transfer(m.amount);
         m.releasedAt = block.timestamp;
         emit FundsReleased(index, m.amount);
+    }
+
+    function refund(address payable donor, uint256 amount) external {
+        require(msg.sender == owner, "Not authorized");
+        require(address(this).balance >= amount, "Insufficient balance");
+        require(totalDonated >= amount, "Cannot refund more than total donated");
+
+        totalDonated -= amount;
+        donor.transfer(amount);
+        emit Refunded(donor, amount);
     }
 
     function getMilestones() external view returns (Milestone[] memory) {
