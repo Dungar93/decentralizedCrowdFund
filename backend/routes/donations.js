@@ -77,8 +77,42 @@ router.post('/', authMiddleware, roleMiddleware(['donor']), async (req, res) => 
         });
       }
 
-      // Get transaction details for logging
+      // Get transaction details for deeper verification
       const txDetails = await provider.getTransaction(transactionHash);
+      if (!txDetails) {
+        return res.status(400).json({ error: 'Transaction details not found on blockchain' });
+      }
+
+      // Verify tx sender matches donor wallet address on record (prevents replay/claiming others tx)
+      const donor = await User.findById(req.user.userId).select('walletAddress');
+      if (!donor?.walletAddress) {
+        return res.status(400).json({ error: 'Please link and verify your wallet before donating.' });
+      }
+
+      if ((txDetails.from || '').toLowerCase() !== donor.walletAddress.toLowerCase()) {
+        return res.status(400).json({ error: 'Transaction sender does not match your linked wallet address' });
+      }
+
+      // Verify calldata is calling donate() on the escrow contract (not an arbitrary tx)
+      if (campaign.smartContractAddress) {
+        const iface = new ethers.Interface(['function donate() payable']);
+        let parsed = null;
+        try {
+          parsed = iface.parseTransaction({ data: txDetails.data, value: txDetails.value });
+        } catch (e) {
+          return res.status(400).json({ error: 'Transaction data does not match donate() call' });
+        }
+
+        if (!parsed || parsed.name !== 'donate') {
+          return res.status(400).json({ error: 'Transaction is not a donate() call' });
+        }
+      }
+
+      // Verify value equals amount (tolerate minor float conversion by comparing wei)
+      const expectedWei = ethers.parseEther(parseFloat(amount).toString());
+      if (txDetails.value !== expectedWei) {
+        return res.status(400).json({ error: 'Transaction value does not match declared donation amount' });
+      }
 
       // Store additional blockchain info
       gasUsed = finalReceipt.gasUsed.toString();
@@ -207,7 +241,7 @@ router.post('/:id/refund', authMiddleware, async (req, res) => {
 
     if (donation.status === 'released') {
       return res.status(400).json({
-        error: 'Cannot refund - funds have already been released to hospital'
+        error: 'Cannot refund - funds have already been released'
       });
     }
 

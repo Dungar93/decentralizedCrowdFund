@@ -80,6 +80,40 @@ router.post('/:campaignId/confirm', authMiddleware, roleMiddleware(['hospital'])
           return res.status(400).json({ error: 'Transaction was not sent to the correct campaign contract' });
         }
 
+        const txDetails = await provider.getTransaction(transactionHash);
+        if (!txDetails) {
+          return res.status(400).json({ error: 'Transaction details not found on blockchain' });
+        }
+
+        // Verify sender matches the hospital's linked wallet address
+        const hospitalUser = await User.findById(req.user.userId).select('walletAddress');
+        if (!hospitalUser?.walletAddress) {
+          return res.status(400).json({ error: 'Hospital wallet is not linked. Please link/verify your wallet first.' });
+        }
+        if ((txDetails.from || '').toLowerCase() !== hospitalUser.walletAddress.toLowerCase()) {
+          return res.status(400).json({ error: 'Transaction sender does not match hospital linked wallet address' });
+        }
+
+        // Verify calldata is confirmMilestone(milestoneIndex) and value is 0
+        const iface = new ethers.Interface(['function confirmMilestone(uint256 index)']);
+        let parsed = null;
+        try {
+          parsed = iface.parseTransaction({ data: txDetails.data, value: txDetails.value });
+        } catch (e) {
+          return res.status(400).json({ error: 'Transaction data does not match confirmMilestone() call' });
+        }
+        if (!parsed || parsed.name !== 'confirmMilestone') {
+          return res.status(400).json({ error: 'Transaction is not a confirmMilestone() call' });
+        }
+
+        const argIndex = Number(parsed.args?.[0]);
+        if (Number.isNaN(argIndex) || argIndex !== Number(milestoneIndex)) {
+          return res.status(400).json({ error: 'Transaction milestone index does not match requested index' });
+        }
+        if (txDetails.value && txDetails.value !== 0n) {
+          return res.status(400).json({ error: 'confirmMilestone() transaction must not send ETH value' });
+        }
+
         onChainResult = {
           success: true,
           transactionHash,
@@ -140,7 +174,7 @@ router.post('/:campaignId/confirm', authMiddleware, roleMiddleware(['hospital'])
 // @access  Private (Patient/Admin role)
 router.post('/:campaignId/release', authMiddleware, roleMiddleware(['patient', 'admin']), async (req, res) => {
   try {
-    const { milestoneIndex } = req.body;
+    const { milestoneIndex, transactionHash } = req.body;
 
     if (milestoneIndex === undefined || milestoneIndex < 0) {
       return res.status(400).json({ error: 'Valid milestone index is required' });
@@ -174,44 +208,107 @@ router.post('/:campaignId/release', authMiddleware, roleMiddleware(['patient', '
 
     let onChainResult = null;
 
-    // If smart contract is deployed, interact with it
+    // If smart contract is deployed, either:
+    // - verify a client-signed on-chain release tx (preferred for patient non-custodial flow), OR
+    // - fallback to server-signed release (legacy / admin tooling).
     if (campaign.smartContractAddress) {
-      try {
-        console.log(`Releasing milestone ${milestoneIndex} on contract ${campaign.smartContractAddress}`);
+      if (transactionHash) {
+        const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || 'http://127.0.0.1:8545');
+        try {
+          const receipt = await provider.getTransactionReceipt(transactionHash);
+          if (!receipt) {
+            await provider.waitForTransaction(transactionHash);
+          }
 
-        // Call the smart contract to release funds
-        const releaseResult = await releaseMilestoneOnChain(
-          campaign.smartContractAddress,
-          milestoneIndex
-        );
+          const finalReceipt = await provider.getTransactionReceipt(transactionHash);
+          if (!finalReceipt || finalReceipt.status === 0) {
+            return res.status(400).json({ error: 'Release transaction failed on blockchain' });
+          }
 
-        onChainResult = {
-          success: true,
-          transactionHash: releaseResult.transactionHash,
-          blockNumber: releaseResult.blockNumber,
-          gasUsed: releaseResult.gasUsed,
-        };
+          if (finalReceipt.to?.toLowerCase() !== campaign.smartContractAddress.toLowerCase()) {
+            return res.status(400).json({ error: 'Transaction was not sent to the correct campaign contract' });
+          }
 
-        // Get contract balance after release
-        const balance = await getContractBalance(campaign.smartContractAddress);
-        onChainResult.remainingBalance = balance;
+          const txDetails = await provider.getTransaction(transactionHash);
+          if (!txDetails) {
+            return res.status(400).json({ error: 'Transaction details not found on blockchain' });
+          }
 
-      } catch (contractError) {
-        console.error('Smart contract release error:', contractError.message);
+          // If the caller is patient, enforce that tx sender matches their linked wallet.
+          // If caller is admin, require linked wallet too (or omit transactionHash and use server-signed fallback).
+          const caller = await User.findById(req.user.userId).select('walletAddress role');
+          if (!caller?.walletAddress) {
+            return res.status(400).json({ error: 'Caller wallet is not linked. Provide no tx hash to use admin server release, or link your wallet.' });
+          }
+          if ((txDetails.from || '').toLowerCase() !== caller.walletAddress.toLowerCase()) {
+            return res.status(400).json({ error: 'Transaction sender does not match caller linked wallet address' });
+          }
 
-        // Check if it's a gas/balance issue
-        if (contractError.message.includes('insufficient funds')) {
-          return res.status(400).json({
-            error: 'Insufficient funds in contract for this milestone',
-            onChainError: contractError.message,
-          });
+          // Verify calldata is releaseMilestone(milestoneIndex) and value is 0
+          const iface = new ethers.Interface(['function releaseMilestone(uint256 index)']);
+          let parsed = null;
+          try {
+            parsed = iface.parseTransaction({ data: txDetails.data, value: txDetails.value });
+          } catch (e) {
+            return res.status(400).json({ error: 'Transaction data does not match releaseMilestone() call' });
+          }
+          if (!parsed || parsed.name !== 'releaseMilestone') {
+            return res.status(400).json({ error: 'Transaction is not a releaseMilestone() call' });
+          }
+          const argIndex = Number(parsed.args?.[0]);
+          if (Number.isNaN(argIndex) || argIndex !== Number(milestoneIndex)) {
+            return res.status(400).json({ error: 'Transaction milestone index does not match requested index' });
+          }
+          if (txDetails.value && txDetails.value !== 0n) {
+            return res.status(400).json({ error: 'releaseMilestone() transaction must not send ETH value' });
+          }
+
+          onChainResult = {
+            success: true,
+            transactionHash,
+            blockNumber: finalReceipt.blockNumber,
+            gasUsed: finalReceipt.gasUsed?.toString?.() || undefined,
+            verifiedOnly: true,
+          };
+
+          const balance = await getContractBalance(campaign.smartContractAddress);
+          onChainResult.remainingBalance = balance;
+        } catch (txError) {
+          return res.status(400).json({ error: 'Failed to verify release transaction: ' + txError.message });
         }
+      } else {
+        try {
+          console.log(`Releasing milestone ${milestoneIndex} on contract ${campaign.smartContractAddress}`);
 
-        // Continue with database update for offline mode
-        onChainResult = {
-          error: contractError.message,
-          databaseOnly: true,
-        };
+          const releaseResult = await releaseMilestoneOnChain(
+            campaign.smartContractAddress,
+            milestoneIndex
+          );
+
+          onChainResult = {
+            success: true,
+            transactionHash: releaseResult.transactionHash,
+            blockNumber: releaseResult.blockNumber,
+            gasUsed: releaseResult.gasUsed,
+          };
+
+          const balance = await getContractBalance(campaign.smartContractAddress);
+          onChainResult.remainingBalance = balance;
+        } catch (contractError) {
+          console.error('Smart contract release error:', contractError.message);
+
+          if (contractError.message.includes('insufficient funds')) {
+            return res.status(400).json({
+              error: 'Insufficient funds in contract for this milestone',
+              onChainError: contractError.message,
+            });
+          }
+
+          onChainResult = {
+            error: contractError.message,
+            databaseOnly: true,
+          };
+        }
       }
     }
 
@@ -237,7 +334,7 @@ router.post('/:campaignId/release', authMiddleware, roleMiddleware(['patient', '
     // Create audit log
     await AuditLog.create({
       userId: req.user.userId,
-      action: 'milestone_funds_released',
+      action: 'funds_released',
       entityType: 'milestone',
       entityId: campaign._id,
       details: {
@@ -295,7 +392,7 @@ router.get('/hospital/my-campaigns', authMiddleware, roleMiddleware(['hospital']
   try {
     const campaigns = await Campaign.find({
       hospitalId: req.user.userId,
-    }).select('title description status milestones raisedAmount targetAmount');
+    }).select('title description status milestones raisedAmount targetAmount smartContractAddress');
 
     res.json({ campaigns });
   } catch (error) {

@@ -101,7 +101,18 @@ router.post('/', authMiddleware, roleMiddleware(['patient']), upload.array('docu
           timeout: 45000, // 45 second timeout per NFR-1
         });
 
-        const { riskScore, verdict } = aiRes.data;
+        // AI service returns { risk_scores: { final_risk_score, ... }, verdict, ... }
+        const riskScore =
+          aiRes.data?.riskScore ??
+          aiRes.data?.risk_scores?.final_risk_score ??
+          aiRes.data?.risk_scores?.final_risk ??
+          aiRes.data?.risk_scores?.final ??
+          aiRes.data?.risk_scores?.finalRiskScore;
+        const verdict = aiRes.data?.verdict;
+
+        if (typeof riskScore !== 'number') {
+          throw new Error('AI verification returned unexpected payload (missing final risk score).');
+        }
 
         // Determine risk category and recommendation
         let riskCategory, recommendation, manualReviewRequired;
@@ -258,11 +269,7 @@ router.get('/:id', async (req, res) => {
     const campaign = await Campaign.findById(req.params.id)
       .populate('patientId', 'name email walletAddress profile')
       .populate('hospitalId', 'name email hospitalName verified walletAddress')
-      .populate('riskAssessmentId')
-      .populate({
-        path: 'donations',
-        populate: { path: 'donorId', select: 'name walletAddress' }
-      });
+      .populate('riskAssessmentId');
 
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' });
