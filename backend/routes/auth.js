@@ -3,6 +3,7 @@ const User = require('../models/User');
 const { generateToken } = require('../utils/jwtUtils');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth');
 const AuditLog = require('../models/AuditLog');
+const { ethers } = require('ethers');
 
 const router = express.Router();
 
@@ -203,10 +204,31 @@ router.post('/verify-wallet', authMiddleware, async (req, res) => {
       });
     }
 
-    // TODO: Verify signature with ethers.js
-    // For now, simple validation
     if (!/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
       return res.status(400).json({ error: 'Invalid wallet address format' });
+    }
+
+    // Verify signature proves wallet ownership.
+    // The frontend must sign the same message string.
+    const message = `MedTrustFund wallet verification for user ${req.user.userId}`;
+    let recovered = null;
+    try {
+      recovered = ethers.verifyMessage(message, signature);
+    } catch (e) {
+      return res.status(400).json({ error: 'Invalid signature format' });
+    }
+
+    if (!recovered || recovered.toLowerCase() !== walletAddress.toLowerCase()) {
+      return res.status(400).json({ error: 'Signature does not match wallet address' });
+    }
+
+    // Prevent wallet reuse across accounts
+    const existingWallet = await User.findOne({
+      walletAddress: walletAddress,
+      _id: { $ne: req.user.userId },
+    }).select('_id');
+    if (existingWallet) {
+      return res.status(400).json({ error: 'Wallet already linked to another account' });
     }
 
     const user = await User.findByIdAndUpdate(
@@ -218,6 +240,15 @@ router.post('/verify-wallet', authMiddleware, async (req, res) => {
       },
       { new: true }
     ).select('-password');
+
+    await AuditLog.create({
+      userId: req.user.userId,
+      action: 'api_call',
+      entityType: 'user',
+      entityId: req.user.userId,
+      details: { walletAddress, signatureVerified: true },
+      status: 'success',
+    }).catch(() => {});
 
     res.json({
       message: 'Wallet verified successfully',

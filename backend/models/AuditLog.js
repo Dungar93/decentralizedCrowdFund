@@ -64,6 +64,10 @@ const AuditLogSchema = new mongoose.Schema({
     type: Date,
     default: () => new Date(Date.now() + 5 * 365 * 24 * 60 * 60 * 1000),
   },
+}, {
+  // Add createdAt for reliable querying/sorting in admin views.
+  // Keep `timestamp` as the domain timestamp (also used in exports if desired).
+  timestamps: { createdAt: true, updatedAt: false },
 });
 
 // Create TTL index for automatic deletion after 5 years
