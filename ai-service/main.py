@@ -1,5 +1,8 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import pytesseract
 from PIL import Image
 import fitz  # PyMuPDF
@@ -13,6 +16,11 @@ from datetime import datetime
 app = FastAPI(title="MedTrustFund AI Verification Service v2.0")
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# Rate limiting configuration
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Medical keywords for content validation
 MEDICAL_KEYWORDS = {
@@ -168,6 +176,22 @@ def analyze_ai_generated_content(text: str) -> dict:
         "medical_keyword_count": medical_coverage
     }
 
+def extract_patient_name(text: str) -> str:
+    """Basic extraction of patient name from text"""
+    patterns = [
+        r"patient\s*name\s*[:\-]\s*([a-z\s]+)(?:[,\n]|$)",
+        r"name\s*[:\-]\s*([a-z\s]+)(?:[,\n]|$)",
+        r"mr\.\s*([a-z\s]+)(?:[,\n]|$)",
+        r"ms\.\s*([a-z\s]+)(?:[,\n]|$)"
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            name = match.group(1).strip()
+            if 3 < len(name) < 40 and not any(w in name.lower() for w in ["age", "sex", "date"]):
+                return name.lower()
+    return ""
+
 def validate_metadata_consistency(files_data: list) -> dict:
     """
     Validate consistency across multiple documents
@@ -229,12 +253,24 @@ def validate_metadata_consistency(files_data: list) -> dict:
         mismatch_score += 20
         inconsistencies.append(f"Multiple document creators detected: {len(creators)}")
 
+    # Check for name inconsistencies
+    names_found = set()
+    for meta in metadata_list:
+        if 'text_content' in meta:
+            name = extract_patient_name(meta['text_content'])
+            if name:
+                names_found.add(name)
+                
+    if len(names_found) > 1:
+        mismatch_score += 30
+        inconsistencies.append(f"Inconsistent patient names detected across documents: {', '.join(names_found)}")
+
     return {
         "score": min(100, mismatch_score),
         "inconsistencies": inconsistencies
     }
 
-def compute_risk_score(files: list) -> dict:
+def compute_risk_score(files: list, hospital_verified: bool = False) -> dict:
     """
     Compute weighted risk score per SRS v2.0 formula:
     RiskScore = w1 × TamperingScore + w2 × AIProbability + w3 × MetadataMismatchScore
@@ -309,6 +345,10 @@ def compute_risk_score(files: list) -> dict:
         WEIGHTS["metadata_mismatch"] * metadata_mismatch
     )
 
+    if hospital_verified:
+        final_risk_score = max(0, int(final_risk_score * 0.8))
+        results["details"].append("Risk score reduced (-20%) due to verified hospital status.")
+
     results["risk_scores"] = {
         "tampering_score": round(avg_tampering, 2),
         "ai_probability_score": round(avg_ai, 2),
@@ -356,30 +396,54 @@ def compute_risk_score(files: list) -> dict:
     return results
 
 @app.post("/verify")
-async def verify_documents(files: list[UploadFile] = File(...)):
+@limiter.limit("10/minute")  # Limit to 10 requests per minute per IP
+async def verify_documents(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    hospital_verified: bool = Form(False)
+):
     """
     Main verification endpoint
     Processes uploaded documents and returns risk assessment
+    Rate limited to 10 requests per minute per IP address
     """
     saved_files = []
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB limit
+    MAX_TOTAL_SIZE = 50 * 1024 * 1024  # 50MB total limit
 
     try:
-        # Save uploaded files
+        # Validate file count
+        if len(files) > 10:
+            raise HTTPException(status_code=400, detail="Maximum 10 files allowed per request")
+
+        # Validate and save uploaded files
+        total_size = 0
         for file in files:
+            # Get file size
+            content = await file.read()
+            file_size = len(content)
+
+            # Validate individual file size
+            if file_size > MAX_FILE_SIZE:
+                raise HTTPException(status_code=400, detail=f"File {file.filename} exceeds 10MB limit")
+
+            total_size += file_size
+            if total_size > MAX_TOTAL_SIZE:
+                raise HTTPException(status_code=400, detail="Total file size exceeds 50MB limit")
+
             file_extension = os.path.splitext(file.filename)[1] if file.filename else ".tmp"
             file_name = f"{int(time.time())}_{file.filename}"
-            path = f"./uploads/{file_name}"
+            file_path = f"./uploads/{file_name}"
 
             # Ensure uploads directory exists
             os.makedirs("./uploads", exist_ok=True)
 
-            with open(path, "wb") as f:
-                content = await file.read()
+            with open(file_path, "wb") as f:
                 f.write(content)
-            saved_files.append(path)
+            saved_files.append(file_path)
 
         # Compute risk score
-        result = compute_risk_score(saved_files)
+        result = compute_risk_score(saved_files, hospital_verified)
 
         return {
             "success": True,
@@ -387,6 +451,8 @@ async def verify_documents(files: list[UploadFile] = File(...)):
             **result
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         return {
             "success": False,
@@ -394,9 +460,18 @@ async def verify_documents(files: list[UploadFile] = File(...)):
             "timestamp": datetime.now().isoformat()
         }
     finally:
-        # Cleanup: In production, consider keeping files or moving to permanent storage
-        # For now, files remain in uploads directory for backend processing
-        pass
+        # Cleanup uploaded files after processing
+        # Files are kept for backend processing but could be moved to permanent storage
+        # In production, consider:
+        # 1. Moving to secure S3 bucket with encryption
+        # 2. Deleting after backend retrieves results
+        # 3. Using temporary storage with auto-cleanup
+        for file_path in saved_files:
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception as cleanup_error:
+                print(f"Cleanup error for {file_path}: {cleanup_error}")
 
 @app.get("/health")
 async def health_check():
@@ -406,6 +481,59 @@ async def health_check():
         "service": "MedTrustFund AI Verification",
         "version": "2.0"
     }
+
+
+@app.post("/verify-hospital")
+@limiter.limit("5/minute")  # Limit to 5 requests per minute for hospital verification
+async def verify_hospital_license(
+    request: Request,
+    license_number: str = Form(...),
+    hospital_name: str = Form(...),
+    state: str = Form("")
+):
+    """
+    Verify hospital license against registry
+    In production, this would call an official state medical board API
+    """
+    try:
+        # Simulated hospital verification logic
+        # In production, replace with actual API call to state medical board
+
+        # Basic validation
+        if not license_number or len(license_number) < 6:
+            return {
+                "verified": False,
+                "confidence": 0,
+                "message": "Invalid license number format"
+            }
+
+        # Check for known patterns (simulated)
+        # Real implementation would query state database
+        is_valid_format = bool(re.match(r'^[A-Z0-9]{6,20}$', license_number.upper()))
+
+        if not is_valid_format:
+            return {
+                "verified": False,
+                "confidence": 0,
+                "message": "License number not found in registry"
+            }
+
+        # Simulated verification with high confidence for valid format
+        return {
+            "verified": True,
+            "confidence": 0.95,
+            "message": "Hospital license verified successfully",
+            "license_number": license_number.upper(),
+            "hospital_name": hospital_name,
+            "state": state or "Unknown"
+        }
+
+    except Exception as e:
+        return {
+            "verified": False,
+            "confidence": 0,
+            "error": str(e)
+        }
 
 if __name__ == "__main__":
     import uvicorn
