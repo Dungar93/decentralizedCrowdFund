@@ -20,6 +20,8 @@ const {
   getContractBalance,
 } = require('../utils/contractUtils');
 const { encryptFile } = require('../utils/encryption');
+const { sendCampaignApprovalEmail, sendCampaignRejectionEmail } = require('../utils/emailService');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 

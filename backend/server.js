@@ -7,6 +7,8 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const mongoSanitize = require("express-mongo-sanitize");
 const xss = require("xss-clean");
+const http = require("http");
+const { Server } = require("socket.io");
 
 // Import routes
 const authRoutes = require("./routes/auth");
@@ -16,12 +18,16 @@ const milestonesRoutes = require("./routes/milestones");
 const adminRoutes = require("./routes/admin");
 const analyticsRoutes = require("./routes/analytics");
 const hospitalsRoutes = require("./routes/hospitals");
+const kycRoutes = require("./routes/kyc");
 
 // Import middleware
 const { auditLogMiddleware } = require("./middleware/auth");
 
 // Import indexer daemon
 const { startIndexer } = require("./utils/indexer");
+
+// Import logger
+const logger = require("./utils/logger");
 
 // Import models
 const Campaign = require("./models/Campaign");
@@ -32,6 +38,19 @@ const SmartContract = require("./models/SmartContract");
 const AuditLog = require("./models/AuditLog");
 
 const app = express();
+const server = http.createServer(app);
+
+// Socket.IO setup for real-time updates
+const io = new Server(server, {
+  cors: {
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
+
+// Store io instance for access in routes
+app.set('io', io);
 
 // Middleware
 app.use(cors());
@@ -76,6 +95,7 @@ app.use("/api/milestones", milestonesRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/hospitals", hospitalsRoutes);
+app.use("/api/kyc", kycRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {
@@ -86,9 +106,36 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+// Socket.IO Connection Handling
+io.on('connection', (socket) => {
+  logger.info(`Socket connected: ${socket.id}`);
+
+  // Join user-specific room
+  socket.on('join_user_room', (userId) => {
+    socket.join(`user:${userId}`);
+    logger.info(`User ${userId} joined room user:${userId}`);
+  });
+
+  // Join campaign-specific room
+  socket.on('join_campaign_room', (campaignId) => {
+    socket.join(`campaign:${campaignId}`);
+    logger.info(`Joined campaign room: campaign:${campaignId}`);
+  });
+
+  // Handle disconnection
+  socket.on('disconnect', () => {
+    logger.info(`Socket disconnected: ${socket.id}`);
+  });
+
+  // Error handling
+  socket.on('error', (error) => {
+    logger.error(`Socket error: ${error.message}`, error);
+  });
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  logger.error(`Server error: ${err.message}`, error);
   res.status(500).json({ error: `Server error: ${err.message}` });
 });
 
@@ -99,7 +146,11 @@ app.use((req, res) => {
 
 // Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+server.listen(PORT, () => {
+  logger.info(`🚀 Backend server running on port ${PORT}`);
+  logger.info(`📍 API URL: http://localhost:${PORT}`);
+  logger.info(`🔌 Socket.IO ready for real-time updates`);
   console.log(`🚀 Backend server running on port ${PORT}`);
   console.log(`📍 API URL: http://localhost:${PORT}`);
+  console.log(`🔌 Socket.IO ready for real-time updates`);
 });

@@ -2,10 +2,68 @@ const { ethers } = require('ethers');
 const fs = require('fs');
 const path = require('path');
 
+// Retry configuration
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 1000; // 1 second
+const MAX_DELAY_MS = 10000; // 10 seconds
+
+/**
+ * Sleep for a specified duration
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Calculate delay with exponential backoff and jitter
+ */
+function calculateBackoffDelay(attempt) {
+  const exponentialDelay = BASE_DELAY_MS * Math.pow(2, attempt);
+  const jitter = Math.random() * 0.2 * exponentialDelay; // 20% jitter
+  return Math.min(exponentialDelay + jitter, MAX_DELAY_MS);
+}
+
+/**
+ * Execute a function with retry logic and exponential backoff
+ * @param {Function} fn - Async function to execute
+ * @param {string} operationName - Name of the operation for logging
+ * @param {number} maxRetries - Maximum number of retry attempts
+ * @returns {Promise<any>} - Result of the function
+ */
+async function executeWithRetry(fn, operationName, maxRetries = MAX_RETRIES) {
+  let lastError;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        const delay = calculateBackoffDelay(attempt - 1);
+        console.log(`[${operationName}] Retry attempt ${attempt}/${maxRetries}, waiting ${Math.round(delay)}ms...`);
+        await sleep(delay);
+      }
+
+      const result = await fn();
+      if (attempt > 0) {
+        console.log(`[${operationName}] Succeeded after ${attempt} retries`);
+      }
+      return result;
+
+    } catch (error) {
+      lastError = error;
+      console.warn(`[${operationName}] Attempt ${attempt + 1}/${maxRetries + 1} failed: ${error.message}`);
+
+      // Don't retry on certain errors
+      if (error.code === 'INSUFFICIENT_FUNDS' || error.code === 'UNPREDICTABLE_GAS_LIMIT') {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error(`[${operationName}] Failed after ${maxRetries + 1} attempts. Last error: ${lastError.message}`);
+}
+
 /**
  * Load compiled contract artifact from Hardhat
  */
-function loadContractArtifact(contractName = 'MedTrustFundEscrow') {
   const artifactPath = path.join(__dirname, '../../hardhat/artifacts/contracts', `${contractName}.sol`, `${contractName}.json`);
 
   if (!fs.existsSync(artifactPath)) {
@@ -37,44 +95,46 @@ function getProviderAndSigner() {
 }
 
 /**
- * Deploy MedTrustFundEscrow contract
+ * Deploy MedTrustFundEscrow contract with retry logic
  */
 async function deployEscrowContract(patientAddress, hospitalAddress, milestones) {
-  const { signer } = getProviderAndSigner();
-  const { abi, bytecode } = loadContractArtifact();
+  return executeWithRetry(async () => {
+    const { signer } = getProviderAndSigner();
+    const { abi, bytecode } = loadContractArtifact();
 
-  // Extract milestone data
-  const descriptions = milestones.map(m => m.description);
-  const amounts = milestones.map(m => ethers.parseEther(m.targetAmount.toString()));
+    // Extract milestone data
+    const descriptions = milestones.map(m => m.description);
+    const amounts = milestones.map(m => ethers.parseEther(m.targetAmount.toString()));
 
-  console.log(`Deploying contract for patient: ${patientAddress}, hospital: ${hospitalAddress}`);
-  console.log(`Milestones: ${descriptions.length} milestones, total: ${amounts.reduce((a, b) => a + b, 0n)} wei`);
+    console.log(`Deploying contract for patient: ${patientAddress}, hospital: ${hospitalAddress}`);
+    console.log(`Milestones: ${descriptions.length} milestones, total: ${amounts.reduce((a, b) => a + b, 0n)} wei`);
 
-  // Create contract factory
-  const factory = new ethers.ContractFactory(abi, bytecode, signer);
+    // Create contract factory
+    const factory = new ethers.ContractFactory(abi, bytecode, signer);
 
-  // Deploy contract
-  const contract = await factory.deploy(
-    patientAddress,
-    hospitalAddress,
-    descriptions,
-    amounts
-  );
+    // Deploy contract
+    const contract = await factory.deploy(
+      patientAddress,
+      hospitalAddress,
+      descriptions,
+      amounts
+    );
 
-  console.log('Waiting for contract deployment...');
-  const deploymentReceipt = await contract.waitForDeployment();
-  const contractAddress = await deploymentReceipt.getAddress();
-  const deploymentTx = deploymentReceipt.deploymentTransaction();
+    console.log('Waiting for contract deployment...');
+    const deploymentReceipt = await contract.waitForDeployment();
+    const contractAddress = await deploymentReceipt.getAddress();
+    const deploymentTx = deploymentReceipt.deploymentTransaction();
 
-  console.log(`Contract deployed at: ${contractAddress}`);
-  console.log(`Transaction hash: ${deploymentTx.hash}`);
+    console.log(`Contract deployed at: ${contractAddress}`);
+    console.log(`Transaction hash: ${deploymentTx.hash}`);
 
-  return {
-    contractAddress,
-    transactionHash: deploymentTx.hash,
-    abi,
-    contract: deploymentReceipt,
-  };
+    return {
+      contractAddress,
+      transactionHash: deploymentTx.hash,
+      abi,
+      contract: deploymentReceipt,
+    };
+  }, 'DeployEscrowContract');
 }
 
 /**
@@ -89,46 +149,50 @@ function getContractInstance(contractAddress, customSigner = null) {
 }
 
 /**
- * Confirm milestone on-chain
+ * Confirm milestone on-chain with retry logic
  */
 async function confirmMilestoneOnChain(contractAddress, milestoneIndex, hospitalWallet) {
-  const { signer } = getProviderAndSigner();
+  return executeWithRetry(async () => {
+    const { signer } = getProviderAndSigner();
 
-  // Hospital needs to sign this transaction
-  const hospitalSigner = new ethers.Wallet(hospitalWallet.privateKey, signer.provider);
-  const contract = getContractInstance(contractAddress, hospitalSigner);
+    // Hospital needs to sign this transaction
+    const hospitalSigner = new ethers.Wallet(hospitalWallet.privateKey, signer.provider);
+    const contract = getContractInstance(contractAddress, hospitalSigner);
 
-  console.log(`Confirming milestone ${milestoneIndex}...`);
-  const tx = await contract.confirmMilestone(milestoneIndex);
-  const receipt = await tx.wait();
+    console.log(`Confirming milestone ${milestoneIndex}...`);
+    const tx = await contract.confirmMilestone(milestoneIndex);
+    const receipt = await tx.wait();
 
-  console.log(`Milestone confirmed in tx: ${receipt.hash}`);
+    console.log(`Milestone confirmed in tx: ${receipt.hash}`);
 
-  return {
-    transactionHash: receipt.hash,
-    blockNumber: receipt.blockNumber,
-    gasUsed: receipt.gasUsed.toString(),
-  };
+    return {
+      transactionHash: receipt.hash,
+      blockNumber: receipt.blockNumber,
+      gasUsed: receipt.gasUsed.toString(),
+    };
+  }, `ConfirmMilestone_${milestoneIndex}`);
 }
 
 /**
- * Release milestone funds on-chain
+ * Release milestone funds on-chain with retry logic
  */
 async function releaseMilestoneOnChain(contractAddress, milestoneIndex) {
-  const { signer } = getProviderAndSigner();
-  const contract = getContractInstance(contractAddress, signer);
+  return executeWithRetry(async () => {
+    const { signer } = getProviderAndSigner();
+    const contract = getContractInstance(contractAddress, signer);
 
-  console.log(`Releasing funds for milestone ${milestoneIndex}...`);
-  const tx = await contract.releaseMilestone(milestoneIndex);
-  const receipt = await tx.wait();
+    console.log(`Releasing funds for milestone ${milestoneIndex}...`);
+    const tx = await contract.releaseMilestone(milestoneIndex);
+    const receipt = await tx.wait();
 
-  console.log(`Funds released in tx: ${receipt.hash}`);
+    console.log(`Funds released in tx: ${receipt.hash}`);
 
-  return {
-    transactionHash: receipt.hash,
-    blockNumber: receipt.blockNumber,
-    gasUsed: receipt.gasUsed.toString(),
-  };
+    return {
+      transactionHash: receipt.hash,
+      blockNumber: receipt.blockNumber,
+      gasUsed: receipt.gasUsed.toString(),
+    };
+  }, `ReleaseMilestone_${milestoneIndex}`);
 }
 
 /**
@@ -141,38 +205,42 @@ async function getContractBalance(contractAddress) {
 }
 
 /**
- * Refund a donation on-chain
+ * Refund a donation on-chain with retry logic
  */
 async function refundDonationOnChain(contractAddress, donorAddress, amountInWei) {
-  const { signer } = getProviderAndSigner();
-  const contract = getContractInstance(contractAddress, signer);
+  return executeWithRetry(async () => {
+    const { signer } = getProviderAndSigner();
+    const contract = getContractInstance(contractAddress, signer);
 
-  console.log(`Refunding on contract ${contractAddress} to ${donorAddress}...`);
-  const tx = await contract.refund(donorAddress, amountInWei);
-  const receipt = await tx.wait();
+    console.log(`Refunding on contract ${contractAddress} to ${donorAddress}...`);
+    const tx = await contract.refund(donorAddress, amountInWei);
+    const receipt = await tx.wait();
 
-  console.log(`Refund complete in tx: ${receipt.hash}`);
+    console.log(`Refund complete in tx: ${receipt.hash}`);
 
-  return {
-    transactionHash: receipt.hash,
-    blockNumber: receipt.blockNumber,
-    gasUsed: receipt.gasUsed.toString(),
-  };
+    return {
+      transactionHash: receipt.hash,
+      blockNumber: receipt.blockNumber,
+      gasUsed: receipt.gasUsed.toString(),
+    };
+  }, `RefundDonation_${donorAddress}`);
 }
 
 /**
- * Get all milestones from contract
+ * Get all milestones from contract with retry logic
  */
 async function getContractMilestones(contractAddress) {
-  const contract = getContractInstance(contractAddress);
-  const milestones = await contract.getMilestones();
+  return executeWithRetry(async () => {
+    const contract = getContractInstance(contractAddress);
+    const milestones = await contract.getMilestones();
 
-  return milestones.map(m => ({
-    description: m.description,
-    amount: ethers.formatEther(m.amount),
-    confirmed: m.confirmed,
-    releasedAt: m.releasedAt.toString(),
-  }));
+    return milestones.map(m => ({
+      description: m.description,
+      amount: ethers.formatEther(m.amount),
+      confirmed: m.confirmed,
+      releasedAt: m.releasedAt.toString(),
+    }));
+  }, 'GetContractMilestones');
 }
 
 module.exports = {
@@ -185,4 +253,7 @@ module.exports = {
   refundDonationOnChain,
   getContractBalance,
   getContractMilestones,
+  executeWithRetry, // Export for external use
+  calculateBackoffDelay, // Export for testing
 };
+
