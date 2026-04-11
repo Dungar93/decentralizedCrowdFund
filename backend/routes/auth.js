@@ -278,4 +278,54 @@ router.get('/users/:id', authMiddleware, roleMiddleware(['admin']), async (req, 
   }
 });
 
+// @route   PUT /api/auth/preferences
+// @desc    Update user email/notification preferences
+// @access  Private
+router.put('/preferences', authMiddleware, async (req, res) => {
+  try {
+    const { emailPreferences } = req.body;
+
+    if (!emailPreferences || typeof emailPreferences !== 'object') {
+      return res.status(400).json({ error: 'Invalid preferences format' });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user.userId,
+      {
+        'preferences.emailNotifications': emailPreferences,
+        updatedAt: Date.now(),
+      },
+      { new: true }
+    ).select('-password');
+
+    res.json({
+      message: 'Preferences updated successfully',
+      preferences: user.preferences?.emailNotifications,
+    });
+  } catch (error) {
+    res.status(500).json({ error: `Failed to update preferences: ${error.message}` });
+  }
+});
+
+// @route   GET /api/auth/preferences
+// @desc    Get user email/notification preferences
+// @access  Private
+router.get('/preferences', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select('-password');
+
+    res.json({
+      preferences: user.preferences?.emailNotifications || {
+        campaignUpdates: true,
+        donationNotifications: true,
+        milestoneAlerts: true,
+        kycStatus: true,
+        marketingEmails: false,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: `Failed to fetch preferences: ${error.message}` });
+  }
+});
+
 module.exports = router;
