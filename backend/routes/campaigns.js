@@ -22,8 +22,19 @@ const {
 const { encryptFile } = require('../utils/encryption');
 const { sendCampaignApprovalEmail, sendCampaignRejectionEmail } = require('../utils/emailService');
 const logger = require('../utils/logger');
+const { getIO } = require('../utils/socket');
 
 const router = express.Router();
+
+// Get IO instance for emitting events
+const getIoInstance = () => {
+  try {
+    return getIO();
+  } catch (e) {
+    logger.warn('Socket.IO not initialized');
+    return null;
+  }
+};
 
 // File upload configuration
 const uploadsDir = path.join(__dirname, '../../uploads');
@@ -211,6 +222,19 @@ router.post('/', authMiddleware, roleMiddleware(['patient']), upload.array('docu
       details: { title, status: campaignStatus },
       status: 'success',
     });
+
+    // Emit socket event for real-time update
+    const io = getIoInstance();
+    if (io) {
+      io.emit('campaign:created', {
+        campaignId: campaign._id,
+        title,
+        status: campaignStatus,
+        patientId: req.user.userId,
+        createdAt: new Date(),
+      });
+      logger.info(`Emitted campaign:created event for campaign ${campaign._id}`);
+    }
 
     // Encrypt uploaded files at rest (HIPAA requirement)
     req.files.forEach((file) => {
@@ -522,7 +546,7 @@ router.post('/:id/admin-review', authMiddleware, roleMiddleware(['admin']), asyn
       return res.status(400).json({ error: 'Decision must be approve or reject' });
     }
 
-    const campaign = await Campaign.findById(req.params.id);
+    const campaign = await Campaign.findById(req.params.id).populate('patientId');
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' });
     }
@@ -555,6 +579,34 @@ router.post('/:id/admin-review', authMiddleware, roleMiddleware(['admin']), asyn
       details: { decision, comments },
       status: 'success',
     });
+
+    // Send email notification
+    const patientEmail = campaign.patientId?.email;
+    if (patientEmail) {
+      if (decision === 'approve') {
+        await sendCampaignApprovalEmail(patientEmail, campaign.title);
+      } else {
+        await sendCampaignRejectionEmail(patientEmail, campaign.title, comments);
+      }
+    }
+
+    // Emit socket event for real-time update
+    const io = getIoInstance();
+    if (io) {
+      io.to(`user:${req.user.userId}`).emit('campaign:reviewed', {
+        campaignId: campaign._id,
+        decision,
+        comments,
+        status: campaign.status,
+      });
+      // Also emit to campaign room for anyone watching
+      io.to(`campaign:${campaign._id}`).emit('campaign:statusChanged', {
+        campaignId: campaign._id,
+        status: campaign.status,
+        reviewedBy: req.user.userId,
+      });
+      logger.info(`Emitted campaign:reviewed event for campaign ${campaign._id}`);
+    }
 
     res.json({
       message: `Campaign ${decision}d successfully`,

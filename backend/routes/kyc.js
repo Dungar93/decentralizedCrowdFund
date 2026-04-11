@@ -6,6 +6,7 @@ const KYCDocument = require('../models/KYCDocument');
 const User = require('../models/User');
 const { authenticate, authorize } = require('../middleware/auth');
 const logger = require('../utils/logger');
+const { sendKYCStatusEmail } = require('../utils/emailService');
 
 const router = express.Router();
 
@@ -286,10 +287,15 @@ router.post('/:id/approve', authenticate, authorize('admin'), async (req, res) =
 
     logger.info(`KYC approved: ${id} by admin ${adminId}`);
 
+    // Send email notification
+    if (user?.email) {
+      await sendKYCStatusEmail(user.email, 'approved', null);
+    }
+
     // Emit socket event if socket.io is available
     if (req.app.get('io')) {
       const io = req.app.get('io');
-      io.to(`user:${kycDocument.user.toString()}`).emit('kyc_status_changed', {
+      io.to(`user:${kycDocument.user.toString()}`).emit('kyc:statusChanged', {
         kycId: kycDocument._id,
         status: 'approved',
         reviewedAt: kycDocument.reviewedAt
@@ -367,10 +373,15 @@ router.post('/:id/reject', authenticate, authorize('admin'), async (req, res) =>
 
     logger.info(`KYC rejected: ${id} by admin ${adminId}, reason: ${reason}`);
 
+    // Send email notification
+    if (user?.email) {
+      await sendKYCStatusEmail(user.email, 'rejected', reason);
+    }
+
     // Emit socket event
     if (req.app.get('io')) {
       const io = req.app.get('io');
-      io.to(`user:${kycDocument.user.toString()}`).emit('kyc_status_changed', {
+      io.to(`user:${kycDocument.user.toString()}`).emit('kyc:statusChanged', {
         kycId: kycDocument._id,
         status: 'rejected',
         reason,

@@ -9,6 +9,7 @@ const mongoSanitize = require("express-mongo-sanitize");
 const xss = require("xss-clean");
 const http = require("http");
 const { Server } = require("socket.io");
+const { initializeSocket } = require("./utils/socket");
 
 // Import routes
 const authRoutes = require("./routes/auth");
@@ -51,6 +52,9 @@ const io = new Server(server, {
 
 // Store io instance for access in routes
 app.set('io', io);
+
+// Initialize socket utility
+initializeSocket(io);
 
 // Middleware
 app.use(cors());

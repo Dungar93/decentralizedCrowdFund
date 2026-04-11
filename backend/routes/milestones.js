@@ -12,8 +12,21 @@ const {
   getContractInstance,
   getContractBalance,
 } = require('../utils/contractUtils');
+const { sendMilestoneConfirmedEmail } = require('../utils/emailService');
+const { getIO } = require('../utils/socket');
+const logger = require('../utils/logger');
 
 const router = express.Router();
+
+// Get IO instance for emitting events
+const getIoInstance = () => {
+  try {
+    return getIO();
+  } catch (e) {
+    logger.warn('Socket.IO not initialized');
+    return null;
+  }
+};
 
 // @route   POST /api/milestones/:campaignId/confirm
 // @desc    Hospital confirms a treatment milestone
@@ -156,6 +169,29 @@ router.post('/:campaignId/confirm', authMiddleware, roleMiddleware(['hospital'])
       },
       status: 'success',
     });
+
+    // Emit socket events for real-time update
+    const io = getIoInstance();
+    if (io) {
+      io.to(`campaign:${campaign._id}`).emit('milestone:confirmed', {
+        campaignId: campaign._id,
+        milestoneIndex,
+        milestoneDescription: milestone.description,
+        confirmedAt: new Date(),
+      });
+
+      // Emit to patient's user room
+      if (campaign.patientId) {
+        io.to(`user:${campaign.patientId.toString()}`).emit('milestone:confirmed', {
+          campaignId: campaign._id,
+          milestoneIndex,
+          milestoneDescription: milestone.description,
+          confirmedAt: new Date(),
+        });
+      }
+
+      logger.info(`Emitted milestone:confirmed event for campaign ${campaign._id}`);
+    }
 
     res.json({
       message: 'Milestone confirmed successfully',
@@ -352,6 +388,65 @@ router.post('/:campaignId/release', authMiddleware, roleMiddleware(['patient', '
       { campaignId: campaign._id, status: 'locked_in_escrow' },
       { status: 'released' }
     );
+
+    // Send email notification to patient and hospital
+    const io = getIoInstance();
+
+    const patient = await User.findById(campaign.patientId);
+    const hospital = await User.findById(campaign.hospitalId);
+
+    if (patient?.email) {
+      await sendMilestoneConfirmedEmail(
+        patient.email,
+        campaign.title,
+        milestone.description,
+        milestone.targetAmount
+      );
+    }
+
+    if (hospital?.email) {
+      await sendMilestoneConfirmedEmail(
+        hospital.email,
+        campaign.title,
+        milestone.description,
+        milestone.targetAmount
+      );
+    }
+
+    // Emit socket events for real-time update
+    if (io) {
+      io.to(`campaign:${campaign._id}`).emit('milestone:released', {
+        campaignId: campaign._id,
+        milestoneIndex,
+        milestoneDescription: milestone.description,
+        amount: milestone.targetAmount,
+        releasedAt: new Date(),
+      });
+
+      // Emit to patient's user room
+      if (campaign.patientId) {
+        io.to(`user:${campaign.patientId.toString()}`).emit('milestone:released', {
+          campaignId: campaign._id,
+          milestoneIndex,
+          milestoneDescription: milestone.description,
+          amount: milestone.targetAmount,
+          releasedAt: new Date(),
+        });
+      }
+
+      // Emit to hospital's user room
+      if (campaign.hospitalId) {
+        io.to(`user:${campaign.hospitalId.toString()}`).emit('milestone:released', {
+          campaignId: campaign._id,
+          milestoneIndex,
+          milestoneDescription: milestone.description,
+          amount: milestone.targetAmount,
+          releasedAt: new Date(),
+        });
+      }
+
+      logger.info(`Emitted milestone:released event for campaign ${campaign._id}`);
+    }
 
     res.json({
       message: 'Milestone funds released successfully',

@@ -6,8 +6,21 @@ const User = require('../models/User');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth');
 const { ethers } = require('ethers');
 const { getContractInstance, refundDonationOnChain } = require('../utils/contractUtils');
+const { sendDonationReceivedEmail, sendDonationConfirmationEmail } = require('../utils/emailService');
+const { getIO } = require('../utils/socket');
+const logger = require('../utils/logger');
 
 const router = express.Router();
+
+// Get IO instance for emitting events
+const getIoInstance = () => {
+  try {
+    return getIO();
+  } catch (e) {
+    logger.warn('Socket.IO not initialized');
+    return null;
+  }
+};
 
 // @route   POST /api/donations
 // @desc    Create a donation (Donor only)
@@ -161,6 +174,56 @@ router.post('/', authMiddleware, roleMiddleware(['donor']), async (req, res) => 
       status: 'success',
     });
 
+    // Send email notifications
+    const io = getIoInstance();
+
+    // Send confirmation email to donor
+    const donor = await User.findById(req.user.userId);
+    if (donor?.email) {
+      await sendDonationConfirmationEmail(
+        donor.email,
+        campaign.title,
+        parseFloat(amount),
+        transactionHash
+      );
+    }
+
+    // Send notification email to campaign owner
+    const campaignOwner = await User.findById(campaign.patientId);
+    if (campaignOwner?.email) {
+      await sendDonationReceivedEmail(
+        campaignOwner.email,
+        campaign.title,
+        parseFloat(amount),
+        donor.name
+      );
+    }
+
+    // Emit socket events for real-time updates
+    if (io) {
+      // Emit to campaign room for anyone watching
+      io.to(`campaign:${campaignId}`).emit('donation:received', {
+        campaignId,
+        donationId: donation._id,
+        amount: parseFloat(amount),
+        donorName: anonymous ? 'Anonymous' : (donor?.name || 'Anonymous'),
+        createdAt: new Date(),
+      });
+
+      // Emit to campaign owner's user room
+      if (campaign.patientId) {
+        io.to(`user:${campaign.patientId.toString()}`).emit('donation:received', {
+          campaignId,
+          donationId: donation._id,
+          amount: parseFloat(amount),
+          donorName: anonymous ? 'Anonymous' : (donor?.name || 'Anonymous'),
+          createdAt: new Date(),
+        });
+      }
+
+      logger.info(`Emitted donation:received event for campaign ${campaignId}`);
+    }
+
     res.status(201).json({
       message: 'Donation recorded successfully',
       donation,
@@ -295,6 +358,29 @@ router.post('/:id/refund', authMiddleware, async (req, res) => {
       status: 'success',
     });
 
+    // Emit socket events for real-time update
+    const io = getIoInstance();
+    if (io) {
+      io.to(`campaign:${campaign._id}`).emit('donation:refunded', {
+        campaignId: campaign._id,
+        donationId: donation._id,
+        amount: donation.amount,
+        refundedAt: new Date(),
+      });
+
+      // Emit to campaign owner's user room
+      if (campaign.patientId) {
+        io.to(`user:${campaign.patientId.toString()}`).emit('donation:refunded', {
+          campaignId: campaign._id,
+          donationId: donation._id,
+          amount: donation.amount,
+          refundedAt: new Date(),
+        });
+      }
+
+      logger.info(`Emitted donation:refunded event for donation ${donation._id}`);
+    }
+
     res.json({ message: 'Refund processed successfully', donation, onChainResult });
   } catch (error) {
     res.status(500).json({ error: `Failed to process refund: ${error.message}` });
@@ -403,6 +489,56 @@ router.post('/:campaignId/donate-direct', authMiddleware, roleMiddleware(['donor
       },
       status: 'success',
     });
+
+    // Send email notifications
+    const io = getIoInstance();
+
+    // Send confirmation email to donor
+    const donor = await User.findById(req.user.userId);
+    if (donor?.email) {
+      await sendDonationConfirmationEmail(
+        donor.email,
+        campaign.title,
+        parseFloat(amount),
+        receipt.hash
+      );
+    }
+
+    // Send notification email to campaign owner
+    const campaignOwner = await User.findById(campaign.patientId);
+    if (campaignOwner?.email) {
+      await sendDonationReceivedEmail(
+        campaignOwner.email,
+        campaign.title,
+        parseFloat(amount),
+        donor.name
+      );
+    }
+
+    // Emit socket events for real-time updates
+    if (io) {
+      // Emit to campaign room for anyone watching
+      io.to(`campaign:${campaign._id}`).emit('donation:received', {
+        campaignId: campaign._id,
+        donationId: donation._id,
+        amount: parseFloat(amount),
+        donorName: donor?.name || 'Anonymous',
+        createdAt: new Date(),
+      });
+
+      // Emit to campaign owner's user room
+      if (campaign.patientId) {
+        io.to(`user:${campaign.patientId.toString()}`).emit('donation:received', {
+          campaignId: campaign._id,
+          donationId: donation._id,
+          amount: parseFloat(amount),
+          donorName: donor?.name || 'Anonymous',
+          createdAt: new Date(),
+        });
+      }
+
+      logger.info(`Emitted donation:received event for campaign ${campaign._id}`);
+    }
 
     res.json({
       message: 'Donation successful!',
