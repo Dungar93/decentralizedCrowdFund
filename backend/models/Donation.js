@@ -36,7 +36,12 @@ const DonationSchema = new mongoose.Schema({
   
   donorMessage: String,
   anonymous: { type: Boolean, default: false },
-  
+
+  // Refund tracking
+  refundTxHash: String,
+  refundReason: String,
+  refundedAt: Date,
+
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });

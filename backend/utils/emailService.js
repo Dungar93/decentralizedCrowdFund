@@ -170,6 +170,30 @@ const sendMilestoneConfirmedEmail = async (userEmail, campaignTitle, milestoneDe
   return sendEmail({ to: userEmail, subject, html });
 };
 
+// Funds Released Email
+const sendFundsReleasedEmail = async (userEmail, campaignTitle, milestoneDescription, amount) => {
+  const subject = 'Funds Released - MedTrustFund';
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #16a34a;">💰 Funds Released</h2>
+      <p>Funds have been released for your campaign <strong>"${campaignTitle}"</strong>.</p>
+      <div style="background-color: #f0fdf4; padding: 16px; border-radius: 8px; margin: 16px 0;">
+        <p style="margin: 0;"><strong>Milestone:</strong> ${milestoneDescription}</p>
+        <p style="margin: 8px 0;"><strong>Amount Released:</strong> ${amount} ETH</p>
+      </div>
+      <p>The funds have been transferred successfully.</p>
+      <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/my-campaigns"
+         style="display: inline-block; padding: 12px 24px; background-color: #7c3aed; color: white; text-decoration: none; border-radius: 6px; margin-top: 16px;">
+        View Campaign
+      </a>
+      <hr style="margin-top: 32px; border: none; border-top: 1px solid #eee;" />
+      <p style="color: #666; font-size: 14px;">MedTrustFund</p>
+    </div>
+  `;
+
+  return sendEmail({ to: userEmail, subject, html });
+};
+
 // KYC Status Changed Email
 const sendKYCStatusEmail = async (userEmail, status, reason) => {
   const subject = `KYC Verification ${status === 'approved' ? 'Successful' : 'Update'} - MedTrustFund`;
@@ -377,6 +401,7 @@ module.exports = {
   sendDonationReceivedEmail,
   sendDonationConfirmationEmail,
   sendMilestoneConfirmedEmail,
+  sendFundsReleasedEmail,
   sendKYCStatusEmail,
   sendWelcomeEmail,
   sendRefundEmail,

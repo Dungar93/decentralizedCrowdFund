@@ -9,137 +9,106 @@ const router = express.Router();
 
 // @route   GET /api/transactions
 // @desc    Get all transactions for current user
-// @access  Private (Authenticated users)
+// @access  Private
 router.get('/', authMiddleware, async (req, res) => {
   try {
-    const { type, status, limit = 50, sortBy = 'createdAt', order = 'desc' } = req.query;
+    const { type, status, limit = 50, campaignId } = req.query;
     const userId = req.user.userId;
+    const userRole = req.user.role;
 
     // Build filter based on user role
-    const filter = {};
+    let filter = {};
 
-    // Admins can see all transactions, others only their own
-    if (req.user.role !== 'admin') {
+    // Role-based filtering
+    if (userRole === 'donor') {
+      filter.donorId = userId;
+    } else if (userRole === 'patient') {
+      // Patients see all transactions for their campaigns
+      const patientCampaigns = await Campaign.find({ patientId: userId }).select('_id');
+      const campaignIds = patientCampaigns.map(c => c._id);
+      filter.campaignId = { $in: campaignIds };
+    } else if (userRole === 'hospital') {
+      // Hospitals see transactions for their assigned campaigns
+      const hospitalCampaigns = await Campaign.find({ hospitalId: userId }).select('_id');
+      const campaignIds = hospitalCampaigns.map(c => c._id);
+      filter.campaignId = { $in: campaignIds };
+    } else if (userRole !== 'admin') {
+      // Default: show user's own donations
       filter.donorId = userId;
     }
 
-    // Apply type filter
-    if (type && type !== 'all') {
+    // Apply additional filters
+    if (type) {
       filter.type = type;
     }
-
-    // Apply status filter
-    if (status && status !== 'all') {
+    if (status) {
       filter.status = status;
     }
+    if (campaignId) {
+      filter.campaignId = campaignId;
+    }
 
-    // Fetch donations
+    // Fetch transactions (donations)
     const donations = await Donation.find(filter)
-      .populate('campaignId', 'title')
-      .populate('donorId', 'name email')
-      .sort({ [sortBy]: order })
+      .populate('campaignId', 'title status smartContractAddress')
+      .populate('donorId', 'name email walletAddress')
+      .sort({ createdAt: -1 })
       .limit(parseInt(limit));
 
-    // Map donations to transaction format
+    // Map donations to unified transaction format
     const transactions = donations.map(d => ({
       _id: d._id,
       type: 'donation',
-      amount: d.amount.toString(),
-      currency: 'ETH',
+      amount: d.amount,
+      currency: d.currency || 'ETH',
       status: d.status,
       txHash: d.transactionHash,
-      fromAddress: d.donorId?.walletAddress,
+      refundTxHash: d.refundTxHash,
       campaignId: d.campaignId,
+      donorId: d.donorId,
+      donorName: d.anonymous ? 'Anonymous' : (d.donorId?.name || 'Anonymous'),
       createdAt: d.createdAt,
-      confirmedAt: d.confirmedAt,
-      blockNumber: d.blockNumber,
-      gasUsed: d.gasUsed,
+      confirmedAt: d.confirmedAt || d.blockNumber ? new Date(d.blockNumber * 12000) : d.createdAt,
       description: `Donation to ${d.campaignId?.title || 'campaign'}`,
+      donorMessage: d.donorMessage,
+      escrowDetails: d.escrowDetails,
     }));
 
-    // Fetch milestone releases (from SmartContract model)
-    if (req.user.role === 'admin' || req.user.role === 'patient') {
-      const patientFilter = req.user.role === 'patient'
-        ? { patientAddress: req.user.walletAddress }
-        : {};
+    // Get transaction count
+    const total = await Donation.countDocuments(filter);
 
-      const contracts = await SmartContract.find(patientFilter)
-        .populate({
-          path: 'campaignId',
-          select: 'title patientId'
-        })
-        .sort({ createdAt: -1 })
-        .limit(parseInt(limit));
+    // Calculate summary statistics
+    const stats = await Donation.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 },
+          totalAmount: { $sum: { $ifNull: ['$amount', 0] } },
+        },
+      },
+    ]);
 
-      contracts.forEach(contract => {
-        if (contract.milestones) {
-          contract.milestones.forEach((milestone, idx) => {
-            if (milestone.confirmed && milestone.releasedAt) {
-              transactions.push({
-                _id: `${contract._id}-milestone-${idx}`,
-                type: 'milestone_release',
-                amount: milestone.amount.toString(),
-                currency: 'ETH',
-                status: 'confirmed',
-                txHash: contract.transactionHash,
-                toAddress: contract.patientAddress,
-                campaignId: contract.campaignId,
-                createdAt: milestone.releasedAt,
-                confirmedAt: milestone.releasedAt,
-                blockNumber: contract.blockNumber,
-                description: `Milestone release: ${milestone.description}`,
-              });
-            }
-          });
-        }
-      });
-    }
-
-    // Fetch refunds (donations with refunded status)
-    const refunds = await Donation.find({
-      ...filter,
-      status: 'refunded',
-      donorId: req.user.role === 'admin' ? undefined : userId
-    })
-      .populate('campaignId', 'title')
-      .populate('donorId', 'name email')
-      .sort({ updatedAt: -1 })
-      .limit(parseInt(limit));
-
-    refunds.forEach(r => {
-      // Avoid duplicates if already in transactions
-      const exists = transactions.find(t => t._id === r._id.toString());
-      if (!exists) {
-        transactions.push({
-          _id: r._id,
-          type: 'refund',
-          amount: r.amount.toString(),
-          currency: 'ETH',
-          status: 'refunded',
-          txHash: r.refundTxHash || r.transactionHash,
-          fromAddress: r.campaignId?.smartContractAddress,
-          toAddress: r.donorId?.walletAddress,
-          campaignId: r.campaignId,
-          createdAt: r.updatedAt,
-          confirmedAt: r.updatedAt,
-          description: `Refund for: ${r.campaignId?.title || 'campaign'}`,
-        });
-      }
+    const statusBreakdown = {};
+    stats.forEach(s => {
+      statusBreakdown[s._id] = {
+        count: s.count,
+        totalAmount: s.totalAmount,
+      };
     });
-
-    // Sort all transactions by date
-    transactions.sort((a, b) => {
-      const dateA = new Date(a.createdAt);
-      const dateB = new Date(b.createdAt);
-      return order === 'desc' ? dateB - dateA : dateA - dateB;
-    });
-
-    // Apply limit after merging
-    const limitedTransactions = transactions.slice(0, parseInt(limit));
 
     res.json({
-      transactions: limitedTransactions,
-      total: transactions.length,
+      transactions,
+      pagination: {
+        total,
+        limit: parseInt(limit),
+        showing: transactions.length,
+      },
+      summary: {
+        totalTransactions: total,
+        totalAmount: donations.reduce((sum, d) => sum + d.amount, 0),
+        byStatus: statusBreakdown,
+      },
     });
   } catch (error) {
     logger.error(`Transactions fetch error: ${error.message}`, error);
@@ -149,85 +118,228 @@ router.get('/', authMiddleware, async (req, res) => {
 
 // @route   GET /api/transactions/:id
 // @desc    Get single transaction details
-// @access  Private (Authenticated users)
+// @access  Private
 router.get('/:id', authMiddleware, async (req, res) => {
   try {
-    const transaction = await Donation.findById(req.params.id)
-      .populate('campaignId', 'title smartContractAddress')
+    const donation = await Donation.findById(req.params.id)
+      .populate('campaignId', 'title status smartContractAddress')
       .populate('donorId', 'name email walletAddress');
 
-    if (!transaction) {
+    if (!donation) {
       return res.status(404).json({ error: 'Transaction not found' });
     }
 
     // Check permission
-    if (req.user.role !== 'admin' && transaction.donorId._id.toString() !== req.user.userId) {
+    const userRole = req.user.role;
+    const isDonor = donation.donorId?._id.toString() === req.user.userId;
+    const isCampaignOwner = donation.campaignId?.patientId?.toString() === req.user.userId;
+    const isAdmin = userRole === 'admin';
+
+    if (!isDonor && !isCampaignOwner && !isAdmin) {
       return res.status(403).json({ error: 'Not authorized to view this transaction' });
     }
 
-    const txData = {
-      _id: transaction._id,
+    // Get smart contract details if available
+    let smartContract = null;
+    if (donation.campaignId?.smartContractAddress) {
+      smartContract = await SmartContract.findOne({
+        contractAddress: donation.campaignId.smartContractAddress
+      });
+    }
+
+    const transaction = {
+      _id: donation._id,
       type: 'donation',
-      amount: transaction.amount.toString(),
-      currency: 'ETH',
-      status: transaction.status,
-      txHash: transaction.transactionHash,
-      fromAddress: transaction.donorId?.walletAddress,
-      toAddress: transaction.campaignId?.smartContractAddress,
-      campaignId: transaction.campaignId,
-      createdAt: transaction.createdAt,
-      confirmedAt: transaction.confirmedAt,
-      blockNumber: transaction.blockNumber,
-      gasUsed: transaction.gasUsed,
-      description: `Donation to ${transaction.campaignId?.title || 'campaign'}`,
+      amount: donation.amount,
+      currency: donation.currency || 'ETH',
+      status: donation.status,
+      txHash: donation.transactionHash,
+      refundTxHash: donation.refundTxHash,
+      refundReason: donation.refundReason,
+      refundedAt: donation.refundedAt,
+      campaignId: donation.campaignId,
+      donorId: donation.donorId,
+      donorName: donation.anonymous ? 'Anonymous' : (donation.donorId?.name || 'Anonymous'),
+      createdAt: donation.createdAt,
+      blockNumber: donation.blockNumber,
+      gasUsed: donation.gasUsed,
+      description: `Donation to ${donation.campaignId?.title || 'campaign'}`,
+      donorMessage: donation.donorMessage,
+      escrowDetails: donation.escrowDetails,
+      smartContract,
     };
 
-    res.json({ transaction: txData });
+    res.json({ transaction });
   } catch (error) {
     logger.error(`Transaction details fetch error: ${error.message}`, error);
-    res.status(500).json({ error: `Failed to fetch transaction: ${error.message}` });
+    res.status(500).json({ error: `Failed to fetch transaction details: ${error.message}` });
   }
 });
 
-// @route   GET /api/transactions/export
+// @route   GET /api/transactions/export/csv
 // @desc    Export transactions as CSV
-// @access  Private (Authenticated users)
+// @access  Private
 router.get('/export/csv', authMiddleware, async (req, res) => {
   try {
+    const { type, status, startDate, endDate } = req.query;
     const userId = req.user.userId;
-    const filter = req.user.role !== 'admin' ? { donorId: userId } : {};
+    const userRole = req.user.role;
+
+    // Build filter
+    let filter = {};
+
+    if (userRole === 'donor') {
+      filter.donorId = userId;
+    } else if (userRole === 'patient') {
+      const patientCampaigns = await Campaign.find({ patientId: userId }).select('_id');
+      const campaignIds = patientCampaigns.map(c => c._id);
+      filter.campaignId = { $in: campaignIds };
+    } else if (userRole === 'admin') {
+      // Admin can filter by date range
+      if (startDate) {
+        filter.createdAt = { $gte: new Date(startDate) };
+      }
+      if (endDate) {
+        filter.createdAt = filter.createdAt || {};
+        filter.createdAt.$lte = new Date(endDate);
+      }
+    } else {
+      filter.donorId = userId;
+    }
+
+    if (status) {
+      filter.status = status;
+    }
 
     const donations = await Donation.find(filter)
       .populate('campaignId', 'title')
-      .populate('donorId', 'name email')
-      .sort({ createdAt: -1 });
+      .populate('donorId', 'name')
+      .sort({ createdAt: -1 })
+      .limit(1000);
 
-    // CSV header
-    const headers = ['Date', 'Type', 'Amount', 'Currency', 'Status', 'TX Hash', 'Description', 'Campaign'];
+    // Generate CSV
+    const csvRows = [];
 
-    // CSV rows
-    const rows = donations.map(d => [
-      new Date(d.createdAt).toLocaleDateString(),
-      'donation',
-      d.amount,
-      'ETH',
-      d.status,
-      d.transactionHash || 'N/A',
-      `Donation to ${d.campaignId?.title || 'campaign'}`,
-      d.campaignId?.title || 'N/A',
-    ]);
+    // Header
+    csvRows.push('Date,Type,Amount,Currency,Status,Transaction Hash,Donor,Campaign,Refund Tx Hash');
 
-    // Build CSV content
-    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
+    // Data rows
+    donations.forEach(d => {
+      const row = [
+        d.createdAt.toISOString().split('T')[0],
+        'donation',
+        d.amount,
+        d.currency || 'ETH',
+        d.status,
+        d.transactionHash || '',
+        d.anonymous ? 'Anonymous' : (d.donorId?.name || 'Unknown'),
+        d.campaignId?.title || 'Unknown',
+        d.refundTxHash || '',
+      ];
+      csvRows.push(row.join(','));
+    });
 
-    // Set headers for file download
+    const csvContent = csvRows.join('\n');
+
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename=transactions-${new Date().toISOString().split('T')[0]}.csv`);
-
+    res.setHeader('Content-Disposition', `attachment; filename="transactions_${new Date().toISOString().split('T')[0]}.csv"`);
     res.send(csvContent);
   } catch (error) {
     logger.error(`CSV export error: ${error.message}`, error);
     res.status(500).json({ error: `Failed to export transactions: ${error.message}` });
+  }
+});
+
+// @route   GET /api/transactions/summary
+// @desc    Get transaction summary statistics
+// @access  Private
+router.get('/summary', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const userRole = req.user.role;
+
+    // Build filter based on role
+    let filter = {};
+    if (userRole === 'donor') {
+      filter.donorId = userId;
+    } else if (userRole === 'patient') {
+      const patientCampaigns = await Campaign.find({ patientId: userId }).select('_id');
+      const campaignIds = patientCampaigns.map(c => c._id);
+      filter.campaignId = { $in: campaignIds };
+    } else if (userRole === 'hospital') {
+      const hospitalCampaigns = await Campaign.find({ hospitalId: userId }).select('_id');
+      const campaignIds = hospitalCampaigns.map(c => c._id);
+      filter.campaignId = { $in: campaignIds };
+    }
+
+    // Get summary statistics
+    const summary = await Donation.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: null,
+          totalTransactions: { $sum: 1 },
+          totalAmount: { $sum: { $ifNull: ['$amount', 0] } },
+          avgAmount: { $avg: '$amount' },
+          maxAmount: { $max: '$amount' },
+          minAmount: { $min: '$amount' },
+        },
+      },
+    ]);
+
+    // Get status breakdown
+    const byStatus = await Donation.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 },
+          totalAmount: { $sum: { $ifNull: ['$amount', 0] } },
+        },
+      },
+    ]);
+
+    // Get monthly trend (last 6 months)
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+    const monthlyTrend = await Donation.aggregate([
+      { $match: { createdAt: { $gte: sixMonthsAgo }, ...filter } },
+      {
+        $group: {
+          _id: {
+            year: { $year: '$createdAt' },
+            month: { $month: '$createdAt' },
+          },
+          count: { $sum: 1 },
+          amount: { $sum: '$amount' },
+        },
+      },
+      { $sort: { '_id.year': 1, '_id.month': 1 } },
+    ]);
+
+    res.json({
+      summary: summary[0] || {
+        totalTransactions: 0,
+        totalAmount: 0,
+        avgAmount: 0,
+        maxAmount: 0,
+        minAmount: 0,
+      },
+      byStatus: byStatus.reduce((acc, s) => {
+        acc[s._id] = { count: s.count, totalAmount: s.totalAmount };
+        return acc;
+      }, {}),
+      monthlyTrend: monthlyTrend.map(m => ({
+        month: m._id.month,
+        year: m._id.year,
+        count: m.count,
+        amount: m.amount,
+      })),
+    });
+  } catch (error) {
+    logger.error(`Transaction summary error: ${error.message}`, error);
+    res.status(500).json({ error: `Failed to fetch transaction summary: ${error.message}` });
   }
 });
 

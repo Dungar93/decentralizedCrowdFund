@@ -12,7 +12,7 @@ const {
   getContractInstance,
   getContractBalance,
 } = require('../utils/contractUtils');
-const { sendMilestoneConfirmedEmail } = require('../utils/emailService');
+const { sendMilestoneConfirmedEmail, sendFundsReleasedEmail } = require('../utils/emailService');
 const { getIO } = require('../utils/socket');
 const logger = require('../utils/logger');
 
@@ -396,7 +396,7 @@ router.post('/:campaignId/release', authMiddleware, roleMiddleware(['patient', '
     const hospital = await User.findById(campaign.hospitalId);
 
     if (patient?.email) {
-      await sendMilestoneConfirmedEmail(
+      await sendFundsReleasedEmail(
         patient.email,
         campaign.title,
         milestone.description,
@@ -405,7 +405,7 @@ router.post('/:campaignId/release', authMiddleware, roleMiddleware(['patient', '
     }
 
     if (hospital?.email) {
-      await sendMilestoneConfirmedEmail(
+      await sendFundsReleasedEmail(
         hospital.email,
         campaign.title,
         milestone.description,
