@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import FileUploader from '../components/ui/FileUploader';
 
 describe('FileUploader', () => {
@@ -7,6 +7,10 @@ describe('FileUploader', () => {
 
   beforeEach(() => {
     mockOnFilesChange.mockClear();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
   });
 
   it('renders dropzone with correct text', () => {
@@ -23,24 +27,27 @@ describe('FileUploader', () => {
     expect(uploadIcon).toBeInTheDocument();
   });
 
-  it('calls onFilesChange when files are dropped', () => {
+  it('calls onFilesChange when files are dropped', async () => {
     render(<FileUploader onFilesChange={mockOnFilesChange} />);
 
-    const dropzone = screen.getByText(/Drag & drop documents/i).closest('div');
+    // Get the dropzone element (the div with role="presentation")
+    const dropzone = screen.getByRole('presentation');
     const mockFile = new File(['test'], 'test.pdf', { type: 'application/pdf' });
 
-    if (dropzone) {
-      fireEvent.drop(dropzone, {
-        dataTransfer: {
-          files: [mockFile],
-        },
-      });
-    }
+    // Fire drop event with proper dataTransfer
+    fireEvent.drop(dropzone, {
+      dataTransfer: {
+        files: [mockFile],
+        types: ['Files'],
+      },
+    });
 
-    expect(mockOnFilesChange).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(mockOnFilesChange).toHaveBeenCalled();
+    });
   });
 
-  it('displays uploaded files list', () => {
+  it('displays uploaded files list', async () => {
     const { container } = render(<FileUploader onFilesChange={mockOnFilesChange} />);
 
     // Simulate file upload by calling the dropzone programmatically
@@ -55,11 +62,13 @@ describe('FileUploader', () => {
       });
     }
 
-    expect(screen.getByText('test.pdf')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('test.pdf')).toBeInTheDocument();
+    });
     expect(screen.getByText(/KB/i)).toBeInTheDocument();
   });
 
-  it('allows removing uploaded files', () => {
+  it('allows removing uploaded files', async () => {
     const { container } = render(<FileUploader onFilesChange={mockOnFilesChange} />);
 
     const input = container.querySelector('input[type="file"]');
@@ -73,16 +82,24 @@ describe('FileUploader', () => {
       });
     }
 
-    const removeButton = screen.getByRole('button', { name: /close/i });
+    await waitFor(() => {
+      expect(screen.getByText('test.pdf')).toBeInTheDocument();
+    });
+
+    // Find the remove button by its SVG icon (FiX)
+    const removeButton = screen.getByRole('button');
     fireEvent.click(removeButton);
 
-    expect(screen.queryByText('test.pdf')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText('test.pdf')).not.toBeInTheDocument();
+    });
   });
 
   it('is disabled when isDisabled prop is true', () => {
     render(<FileUploader onFilesChange={mockOnFilesChange} isDisabled />);
 
-    const dropzone = screen.getByText(/Drag & drop documents/i).closest('div');
+    // The dropzone div should have cursor-not-allowed class
+    const dropzone = screen.getByRole('presentation');
     expect(dropzone).toHaveClass('cursor-not-allowed');
   });
 });

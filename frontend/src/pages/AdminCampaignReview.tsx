@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FiShield, FiAlertTriangle, FiCheckCircle, FiXCircle,
-  FiFileText, FiUser, FiDollarSign, FiClock, FiEye, FiChevronRight
+  FiFileText, FiUser, FiDollarSign, FiEye, FiChevronRight
 } from 'react-icons/fi';
 import api from '../services/api';
 

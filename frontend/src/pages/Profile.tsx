@@ -104,7 +104,7 @@ export default function Profile() {
               <div className="flex flex-col md:flex-row justify-between md:items-start gap-4">
                 <div>
                   <h2 className="text-3xl font-bold text-white mb-1 flex items-center gap-3">
-                    {user.name || user.fullName}
+                    {user.name || user.email?.split('@')[0]}
                     {user.role === 'donor' && <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 uppercase tracking-wider"><FiAward/> Sustainer</span>}
                   </h2>
                   <p className="text-slate-400">{user.email}</p>

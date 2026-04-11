@@ -206,7 +206,7 @@ export default function CampaignDetail() {
         });
       }
 
-      const response = await api.post(`/api/milestones/${id}/confirm`, {
+      await api.post(`/api/milestones/${id}/confirm`, {
         milestoneIndex,
         transactionHash: txHash
       });

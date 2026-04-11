@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   FiActivity, FiArrowUpRight, FiArrowDownLeft, FiClock,
-  FiCheckCircle, FiXCircle, FiSearch, FiFilter, FiDownload,
+  FiCheckCircle, FiXCircle, FiSearch, FiDownload,
   FiExternalLink, FiCalendar, FiDollarSign
 } from 'react-icons/fi';
 import api from '../services/api';
@@ -31,7 +31,7 @@ interface Transaction {
 
 export default function TransactionHistory() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user: _user } = useAuth(); // eslint-disable-line @typescript-eslint/no-unused-vars
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'donation' | 'milestone_release' | 'refund'>('all');

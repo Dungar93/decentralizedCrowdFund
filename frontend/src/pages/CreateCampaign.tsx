@@ -5,7 +5,7 @@ import api from "../services/api";
 import {
   FiFilePlus, FiActivity, FiShield,
   FiCheckCircle, FiUploadCloud, FiTrash2, FiPlusCircle,
-  FiArrowRight, FiArrowLeft, FiHospital, FiLoader
+  FiArrowRight, FiArrowLeft, FiLoader
 } from "react-icons/fi";
 
 interface FormData {

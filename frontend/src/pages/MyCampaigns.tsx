@@ -2,9 +2,9 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import api from "../services/api";
-import { 
-  FiPlusCircle, FiLayout, FiAlertTriangle, FiCheckCircle, 
-  FiShield, FiCode, FiArrowRight, FiEdit2, FiSearch
+import {
+  FiPlusCircle, FiLayout, FiAlertTriangle, FiCheckCircle,
+  FiShield, FiCode, FiArrowRight, FiSearch
 } from "react-icons/fi";
 
 interface Campaign {
@@ -32,7 +32,6 @@ export default function MyCampaigns() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
-  const [deployingContract, setDeployingContract] = useState<string | null>(null);
 
   useEffect(() => {
     fetchMyCampaigns();
@@ -49,24 +48,6 @@ export default function MyCampaigns() {
       setError(err.response?.data?.error || "Failed to load campaigns");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const deployContract = async (campaignId: string) => {
-    try {
-      setDeployingContract(campaignId);
-      setError("");
-
-      const response = await api.post(`/api/campaigns/${campaignId}/deploy-contract`);
-
-      // Using alert for immediate visual feedback without complex popup state handling
-      alert(`Contract deployed successfully!\n\nNetwork Address:\n${response.data.contractAddress}`);
-      fetchMyCampaigns();
-    } catch (err: any) {
-      console.error("Contract deployment error:", err);
-      setError(err.response?.data?.error || "Failed to deploy contract");
-    } finally {
-      setDeployingContract(null);
     }
   };
 

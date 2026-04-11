@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FiUpload, FiFile, FiCheckCircle, FiXCircle, FiClock,
-  FiAlertCircle, FiTrash2, FiPlus, FiShield, FiUser
+  FiAlertCircle, FiTrash2, FiShield, FiUser
 } from 'react-icons/fi';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -24,8 +23,7 @@ interface DocumentFile {
 }
 
 export default function KYCSubmission() {
-  const navigate = useNavigate();
-  const { user, refreshUser } = useAuth();
+  const { refreshUser } = useAuth();
   const [kycStatus, setKycStatus] = useState<KYCStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -438,25 +436,13 @@ export default function KYCSubmission() {
             <h3 className="text-xl font-bold text-white mb-2">
               {kycStatus.status === 'approved'
                 ? 'KYC Verified'
-                : kycStatus.status === 'pending'
-                ? 'Under Review'
-                : 'Application Rejected'}
+                : 'Under Review'}
             </h3>
             <p className="text-slate-400 mb-6">
               {kycStatus.status === 'approved'
                 ? 'Your identity has been successfully verified.'
-                : kycStatus.status === 'pending'
-                ? 'Your documents are being reviewed. This usually takes 24-48 hours.'
-                : 'Your KYC application was rejected. You may submit a new application.'}
+                : 'Your documents are being reviewed. This usually takes 24-48 hours.'}
             </p>
-            {kycStatus.status === 'rejected' && (
-              <button
-                onClick={() => setKycStatus({ status: 'not_submitted' })}
-                className="px-6 py-3 bg-purple-500 hover:bg-purple-400 text-white font-bold rounded-xl transition-all"
-              >
-                Submit New Application
-              </button>
-            )}
           </motion.div>
         )}
       </div>

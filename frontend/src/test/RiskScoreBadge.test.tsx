@@ -27,29 +27,32 @@ describe('RiskScoreBadge', () => {
   it('applies correct color class for low risk', () => {
     const { container } = render(<RiskScoreBadge score={20} />);
 
-    const badge = container.firstChild as HTMLElement;
-    expect(badge).toHaveClass('bg-green-100');
+    // The color class is on the inner div, not the wrapper
+    const badge = container.querySelector('.bg-green-100');
+    expect(badge).toBeInTheDocument();
   });
 
   it('applies correct color class for medium risk', () => {
     const { container } = render(<RiskScoreBadge score={50} />);
 
-    const badge = container.firstChild as HTMLElement;
-    expect(badge).toHaveClass('bg-orange-100');
+    const badge = container.querySelector('.bg-orange-100');
+    expect(badge).toBeInTheDocument();
   });
 
   it('applies correct color class for high risk', () => {
     const { container } = render(<RiskScoreBadge score={80} />);
 
-    const badge = container.firstChild as HTMLElement;
-    expect(badge).toHaveClass('bg-red-100');
+    const badge = container.querySelector('.bg-red-100');
+    expect(badge).toBeInTheDocument();
   });
 
   it('shows tooltip on hover', () => {
     const { container } = render(<RiskScoreBadge score={50} />);
 
-    const badge = container.firstChild as HTMLElement;
-    fireEvent.mouseEnter(badge);
+    const badge = container.querySelector('.bg-orange-100');
+    if (badge) {
+      fireEvent.mouseEnter(badge);
+    }
 
     expect(screen.getByText(/Fraud risk score/i)).toBeInTheDocument();
   });
@@ -64,6 +67,3 @@ describe('RiskScoreBadge', () => {
     expect(screen.queryByText(/Fraud risk score/i)).not.toBeInTheDocument();
   });
 });
-
-// Helper for fireEvent
-import { fireEvent } from '@testing-library/react';

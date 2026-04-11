@@ -2,13 +2,12 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  FiBell, FiCheck, FiTrash2, FiClock, FiAlertCircle,
-  FiCheckCircle, FiXCircle, FiDollarSign, FiFileText, FiShield
+  FiBell, FiCheck, FiTrash2,
+  FiCheckCircle, FiDollarSign, FiFileText, FiShield
 } from 'react-icons/fi';
 import { useAuth } from '../contexts/AuthContext';
 import {
-  initSocket, joinRoom, onSocketEvent, offSocketEvent,
-  subscribeToEvents, unsubscribeFromEvents
+  initSocket, joinRoom, subscribeToEvents, unsubscribeFromEvents
 } from '../utils/socket';
 
 export interface Notification {
@@ -28,8 +27,9 @@ export default function Notifications() {
   const [filter, setFilter] = useState<'all' | 'unread' | 'campaign' | 'donation' | 'milestone' | 'kyc'>('all');
 
   useEffect(() => {
-    // Initialize socket on mount
-    const socket = initSocket();
+    if (!user?.id) return;
+
+    initSocket();
 
     if (user?.id) {
       // Join user-specific room

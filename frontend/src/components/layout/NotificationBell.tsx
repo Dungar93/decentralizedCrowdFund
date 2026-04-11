@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FiBell } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
-import { initSocket, joinRoom, subscribeToEvents, unsubscribeFromEvents } from '../../utils/socket';
+import { initSocket, joinRoom } from '../../utils/socket';
 import { useAuth } from '../../contexts/AuthContext';
 
 export default function NotificationBell() {
