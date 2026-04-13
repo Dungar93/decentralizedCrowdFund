@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FiShield, FiAlertTriangle, FiCheckCircle, FiXCircle,
-  FiFileText, FiUser, FiDollarSign, FiEye, FiChevronRight
+  FiFileText, FiUser, FiDollarSign, FiEye, FiChevronRight,
+  FiRefreshCw, FiWifi
 } from 'react-icons/fi';
 import api from '../services/api';
 
@@ -11,6 +12,14 @@ interface PatientRef {
   _id?: string;
   name?: string;
   email?: string;
+}
+
+interface HospitalRef {
+  _id?: string;
+  name?: string;
+  hospitalName?: string;
+  walletAddress?: string;
+  verified?: boolean;
 }
 
 interface CampaignDoc {
@@ -45,9 +54,18 @@ interface Campaign {
   status: string;
   patient?: PatientRef;
   patientId?: PatientRef;
+  hospitalId?: HospitalRef;
   documents?: CampaignDoc[];
   riskAssessment?: RiskData;
   riskAssessmentId?: RiskData;
+  createdAt: string;
+}
+
+interface DonationRecord {
+  _id: string;
+  amount: number;
+  status: string;
+  donorId?: { name?: string; email?: string };
   createdAt: string;
 }
 
@@ -82,6 +100,15 @@ export default function AdminCampaignReview() {
   const [success, setSuccess] = useState('');
   const [reviewNote, setReviewNote] = useState('');
 
+  // Donation refund state
+  const [donations, setDonations] = useState<DonationRecord[]>([]);
+  const [donationsLoading, setDonationsLoading] = useState(false);
+  const [refundingId, setRefundingId] = useState<string | null>(null);
+  const [refundReason, setRefundReason] = useState('');
+  const [refundTarget, setRefundTarget] = useState<string | null>(null);
+  const [refundError, setRefundError] = useState('');
+  const [refundSuccess, setRefundSuccess] = useState('');
+
   useEffect(() => {
     fetchPendingCampaigns();
   }, []);
@@ -97,6 +124,30 @@ export default function AdminCampaignReview() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchDonations = useCallback(async (campaignId: string) => {
+    try {
+      setDonationsLoading(true);
+      setDonations([]);
+      const res = await api.get(`/api/donations?campaignId=${campaignId}`);
+      const all: DonationRecord[] = res.data.donations || [];
+      // Show only refundable donations
+      setDonations(all.filter((d) => d.status === 'locked_in_escrow'));
+    } catch (err: any) {
+      console.error('Failed to fetch donations:', err);
+    } finally {
+      setDonationsLoading(false);
+    }
+  }, []);
+
+  const handleSelectCampaign = (campaign: Campaign) => {
+    setSelectedCampaign(campaign);
+    setRefundError('');
+    setRefundSuccess('');
+    setRefundTarget(null);
+    setRefundReason('');
+    fetchDonations(campaign._id);
   };
 
   const openCampaignDocument = async (campaignId: string, docIndex: number) => {
@@ -145,6 +196,28 @@ export default function AdminCampaignReview() {
       setError(err.response?.data?.error || `Failed to ${decision} campaign`);
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleRefund = async (donationId: string) => {
+    if (!refundReason.trim()) {
+      setRefundError('Please enter a reason for the refund.');
+      return;
+    }
+    try {
+      setRefundingId(donationId);
+      setRefundError('');
+      setRefundSuccess('');
+      await api.post(`/api/donations/${donationId}/admin-refund`, { reason: refundReason.trim() });
+      setRefundSuccess('Refund processed successfully.');
+      setRefundTarget(null);
+      setRefundReason('');
+      // Refresh donations list
+      if (selectedCampaign) fetchDonations(selectedCampaign._id);
+    } catch (err: any) {
+      setRefundError(err.response?.data?.error || 'Refund failed. Try again.');
+    } finally {
+      setRefundingId(null);
     }
   };
 
@@ -228,6 +301,150 @@ export default function AdminCampaignReview() {
 
     return (
       <p className="text-sm text-slate-500">No detailed breakdown available for this assessment.</p>
+    );
+  };
+
+  /** Feature 6: Hospital Wallet Validation Panel */
+  const renderHospitalWalletStatus = (campaign: Campaign) => {
+    const hospital = campaign.hospitalId;
+
+    if (!hospital) {
+      return (
+        <div className="p-3 bg-slate-800/60 border border-white/5 rounded-xl flex items-start gap-3">
+          <FiUser className="w-4 h-4 text-slate-500 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-0.5">Hospital Assignment</p>
+            <p className="text-sm text-slate-500">No hospital assigned yet. Contract deployment is blocked until a verified hospital is assigned.</p>
+          </div>
+        </div>
+      );
+    }
+
+    const hospitalName = hospital.hospitalName || hospital.name || 'Assigned Hospital';
+
+    if (!hospital.walletAddress) {
+      return (
+        <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl flex items-start gap-3">
+          <FiAlertTriangle className="w-4 h-4 text-rose-400 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-xs font-bold text-rose-400 uppercase tracking-wider mb-1">⚠ Hospital Has No Wallet Linked</p>
+            <p className="text-sm text-rose-300 font-medium">{hospitalName}</p>
+            <p className="text-xs text-rose-300/70 mt-1">
+              Contract deployment will fail (deploys to <code className="bg-rose-900/30 px-1 rounded">address(0)</code>).
+              Ask the hospital to set their wallet in their Profile before you deploy.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-start gap-3">
+        <FiCheckCircle className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+        <div className="min-w-0">
+          <p className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-1">Hospital Wallet Linked ✓</p>
+          <p className="text-sm text-white font-medium">{hospitalName}</p>
+          <p className="text-[10px] text-emerald-300/70 font-mono mt-1 truncate">
+            {hospital.walletAddress}
+          </p>
+        </div>
+      </div>
+    );
+  };
+
+  /** Feature 8: Donor Refund Panel */
+  const renderRefundPanel = () => {
+    if (donationsLoading) {
+      return (
+        <div className="flex items-center gap-2 text-slate-500 text-sm py-4">
+          <FiRefreshCw className="w-4 h-4 animate-spin" />
+          Loading donations…
+        </div>
+      );
+    }
+
+    if (donations.length === 0) {
+      return (
+        <p className="text-sm text-slate-500 py-3">
+          No refundable donations (all already released or refunded).
+        </p>
+      );
+    }
+
+    return (
+      <div className="space-y-3">
+        {refundError && (
+          <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
+            {refundError}
+          </p>
+        )}
+        {refundSuccess && (
+          <p className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">
+            {refundSuccess}
+          </p>
+        )}
+        {donations.map((d) => {
+          const donorLabel = d.donorId?.name || d.donorId?.email || 'Anonymous Donor';
+          const isTargeted = refundTarget === d._id;
+          return (
+            <div key={d._id} className="p-3 bg-slate-900/60 border border-white/5 rounded-xl space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-white">{donorLabel}</p>
+                  <p className="text-xs text-slate-500">
+                    {parseFloat(d.amount as any).toFixed(4)} ETH · {new Date(d.createdAt).toLocaleDateString()}
+                  </p>
+                </div>
+                {!isTargeted ? (
+                  <button
+                    type="button"
+                    onClick={() => { setRefundTarget(d._id); setRefundReason(''); setRefundError(''); setRefundSuccess(''); }}
+                    className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/40 border border-amber-500/30 text-amber-300 text-xs font-bold rounded-lg transition-colors flex-shrink-0"
+                  >
+                    Refund
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setRefundTarget(null)}
+                    className="px-3 py-1.5 bg-slate-700 text-slate-300 text-xs font-bold rounded-lg transition-colors flex-shrink-0"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+
+              {isTargeted && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="space-y-2"
+                >
+                  <input
+                    type="text"
+                    value={refundReason}
+                    onChange={(e) => setRefundReason(e.target.value)}
+                    placeholder="Reason for refund (required)…"
+                    className="w-full px-3 py-2 bg-slate-800 border border-white/10 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500/50"
+                  />
+                  <button
+                    type="button"
+                    disabled={refundingId === d._id}
+                    onClick={() => handleRefund(d._id)}
+                    className="w-full py-2 bg-amber-500 hover:bg-amber-400 text-white font-bold rounded-lg text-sm transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {refundingId === d._id ? (
+                      <><FiRefreshCw className="w-4 h-4 animate-spin" /> Processing…</>
+                    ) : (
+                      'Confirm Refund'
+                    )}
+                  </button>
+                </motion.div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     );
   };
 
@@ -318,11 +535,11 @@ export default function AdminCampaignReview() {
                       exit={{ opacity: 0, x: 20 }}
                       role="button"
                       tabIndex={0}
-                      onClick={() => setSelectedCampaign(campaign)}
+                      onClick={() => handleSelectCampaign(campaign)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault();
-                          setSelectedCampaign(campaign);
+                          handleSelectCampaign(campaign);
                         }
                       }}
                       className={`glass-card p-5 rounded-2xl border cursor-pointer transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/70 ${
@@ -375,9 +592,9 @@ export default function AdminCampaignReview() {
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
-                  className="glass-panel p-6 rounded-3xl border border-white/10"
+                  className="glass-panel p-6 rounded-3xl border border-white/10 space-y-6 max-h-[85vh] overflow-y-auto"
                 >
-                  <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center justify-between">
                     <h2 className="text-xl font-bold text-white">Review Campaign</h2>
                     <button
                       type="button"
@@ -389,7 +606,8 @@ export default function AdminCampaignReview() {
                     </button>
                   </div>
 
-                  <div className="space-y-4 mb-6">
+                  {/* Campaign Info */}
+                  <div className="space-y-4">
                     <div>
                       <h3 className="font-bold text-white text-lg mb-2">
                         {selectedCampaign.title}
@@ -412,6 +630,15 @@ export default function AdminCampaignReview() {
                       </div>
                     </div>
 
+                    {/* --- Feature 6: Hospital Wallet Status --- */}
+                    <div>
+                      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                        <FiWifi className="w-3.5 h-3.5" /> Hospital Wallet Status
+                      </p>
+                      {renderHospitalWalletStatus(selectedCampaign)}
+                    </div>
+
+                    {/* Risk Assessment */}
                     {(() => {
                       const ra = getRisk(selectedCampaign);
                       if (!ra) return null;
@@ -440,6 +667,7 @@ export default function AdminCampaignReview() {
                       );
                     })()}
 
+                    {/* Documents */}
                     {selectedCampaign.documents && selectedCampaign.documents.length > 0 && (
                       <div>
                         <h4 className="font-bold text-white mb-2 text-sm flex items-center gap-2">
@@ -466,7 +694,8 @@ export default function AdminCampaignReview() {
                     )}
                   </div>
 
-                  <div className="mb-6">
+                  {/* Review Note */}
+                  <div>
                     <label className="block text-sm font-semibold text-slate-300 mb-2">
                       Review note (optional)
                     </label>
@@ -479,6 +708,7 @@ export default function AdminCampaignReview() {
                     />
                   </div>
 
+                  {/* Approve / Reject */}
                   <div className="flex gap-3">
                     <button
                       type="button"
@@ -498,6 +728,18 @@ export default function AdminCampaignReview() {
                       <FiXCircle className="w-5 h-5" />
                       Reject
                     </button>
+                  </div>
+
+                  {/* --- Feature 8: Donor Refund Panel --- */}
+                  <div className="pt-4 border-t border-white/5">
+                    <h4 className="text-sm font-bold text-white mb-1 flex items-center gap-2">
+                      <FiDollarSign className="w-4 h-4 text-amber-400" />
+                      Refund Donations
+                    </h4>
+                    <p className="text-xs text-slate-500 mb-3">
+                      Refundable donations (status: locked in escrow) for this campaign.
+                    </p>
+                    {renderRefundPanel()}
                   </div>
                 </motion.div>
               ) : (

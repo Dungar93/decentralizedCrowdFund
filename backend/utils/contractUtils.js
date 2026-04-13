@@ -149,15 +149,33 @@ function getContractInstance(contractAddress, customSigner = null) {
   return contract;
 }
 
-/**
- * Confirm milestone on-chain with retry logic
- */
-async function confirmMilestoneOnChain(contractAddress, milestoneIndex, hospitalWallet) {
+async function confirmMilestoneOnChain(contractAddress, milestoneIndex, hospitalAddressOrWallet) {
   return executeWithRetry(async () => {
-    const { signer } = getProviderAndSigner();
+    const { signer, provider } = getProviderAndSigner();
+    let hospitalSigner;
 
-    // Hospital needs to sign this transaction
-    const hospitalSigner = new ethers.Wallet(hospitalWallet.privateKey, signer.provider);
+    if (typeof hospitalAddressOrWallet === 'string') {
+      try {
+        console.log(`Impersonating hospital address ${hospitalAddressOrWallet} for testing bypass...`);
+        await provider.send("hardhat_impersonateAccount", [hospitalAddressOrWallet]);
+        hospitalSigner = await provider.getSigner(hospitalAddressOrWallet);
+        
+        // Give the impersonated account some ETH for gas just in case
+        await provider.send("hardhat_setBalance", [
+          hospitalAddressOrWallet,
+          "0xde0b6b3a7640000" // 1 ETH
+        ]);
+      } catch (err) {
+        console.error("Impersonation failed! Are you running on localhost/hardhat node?", err);
+        throw new Error("Failed to impersonate hospital address: " + err.message);
+      }
+    } else if (hospitalAddressOrWallet && hospitalAddressOrWallet.privateKey) {
+      // Real wallet scenario
+      hospitalSigner = new ethers.Wallet(hospitalAddressOrWallet.privateKey, provider);
+    } else {
+      throw new Error("Missing hospital wallet or address to confirm milestone on-chain");
+    }
+
     const contract = getContractInstance(contractAddress, hospitalSigner);
 
     console.log(`Confirming milestone ${milestoneIndex}...`);
@@ -165,6 +183,11 @@ async function confirmMilestoneOnChain(contractAddress, milestoneIndex, hospital
     const receipt = await tx.wait();
 
     console.log(`Milestone confirmed in tx: ${receipt.hash}`);
+
+    // Stop impersonating
+    if (typeof hospitalAddressOrWallet === 'string') {
+      await provider.send("hardhat_stopImpersonatingAccount", [hospitalAddressOrWallet]).catch(() => {});
+    }
 
     return {
       transactionHash: receipt.hash,

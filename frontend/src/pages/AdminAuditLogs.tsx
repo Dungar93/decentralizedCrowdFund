@@ -53,8 +53,8 @@ export default function AdminAuditLogs() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-    } catch (err) {
-      alert("Failed to export compliance logs.");
+    } catch (err: any) {
+      alert(`Failed to export compliance logs: ${err.response?.data?.error || err.message}`);
     }
   };
 

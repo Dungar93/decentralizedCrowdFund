@@ -38,6 +38,7 @@ interface Campaign {
     url: string;
     hash: string;
   }>;
+  expiresAt?: string;
 }
 
 interface Donation {
@@ -55,6 +56,7 @@ export default function CampaignDetail() {
   const [donations, setDonations] = useState<Donation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
   const [donationAmount, setDonationAmount] = useState("");
   const [donating, setDonating] = useState(false);
   const [walletConnected, setWalletConnected] = useState(false);
@@ -94,13 +96,13 @@ export default function CampaignDetail() {
   const deployContract = async () => {
     try {
       setDeployingContract(true);
-      setError("");
+      setActionError("");
       const response = await api.post(`/api/campaigns/${id}/deploy-contract`);
       alert(`Contract deployed successfully to ${response.data.contractAddress}`);
       fetchCampaign();
     } catch (err: any) {
       console.error("Failed to deploy contract:", err);
-      setError(err.response?.data?.error || "Failed to deploy contract");
+      setActionError(err.response?.data?.error || "Failed to deploy contract");
     } finally {
       setDeployingContract(false);
     }
@@ -121,7 +123,7 @@ export default function CampaignDetail() {
       localStorage.setItem("walletAddress", accounts[0]);
     } catch (err: any) {
       console.error("Wallet connection error:", err);
-      setError("Failed to connect wallet");
+      setActionError("Failed to connect wallet");
     }
   };
 
@@ -129,21 +131,21 @@ export default function CampaignDetail() {
     e.preventDefault();
 
     if (!donationAmount || parseFloat(donationAmount) <= 0) {
-      setError("Please enter a valid donation amount");
+      setActionError("Please enter a valid donation amount");
       return;
     }
 
     if (!campaign?.smartContractAddress) {
-      setError("Smart contract not deployed yet. Please wait for admin deployment.");
+      setActionError("Smart contract not deployed yet. Please wait for admin deployment.");
       return;
     }
 
     try {
       setDonating(true);
-      setError("");
+      setActionError("");
 
       if (!(window as any).ethereum) {
-        setError("MetaMask not installed. Please install MetaMask to donate.");
+        setActionError("MetaMask not installed. Please install MetaMask to donate.");
         return;
       }
 
@@ -173,7 +175,46 @@ export default function CampaignDetail() {
       fetchDonations();
     } catch (err: any) {
       console.error("Donation error:", err);
-      setError(err.response?.data?.error || "Failed to process donation");
+      // Extract the most informative error message
+      const msg =
+        err?.response?.data?.error ||
+        err?.reason ||
+        err?.info?.error?.message ||
+        err?.shortMessage ||
+        err?.message ||
+        "Failed to process donation";
+      setActionError(msg);
+    } finally {
+      setDonating(false);
+    }
+  };
+
+  const handleDonateDirect = async () => {
+    if (!donationAmount || parseFloat(donationAmount) <= 0) {
+      setActionError("Please enter a valid donation amount");
+      return;
+    }
+
+    if (!campaign?.smartContractAddress) {
+      setActionError("Smart contract not deployed yet. Please wait for admin deployment.");
+      return;
+    }
+
+    try {
+      setDonating(true);
+      setActionError("");
+
+      const response = await api.post(`/api/donations/${id}/donate-direct`, {
+        amount: donationAmount
+      });
+
+      alert(`Backend test donation successful!\nTransaction: ${response.data.transactionHash.slice(0, 20)}...`);
+      setDonationAmount("");
+      fetchCampaign();
+      fetchDonations();
+    } catch (err: any) {
+      console.error("Direct donation error:", err);
+      setActionError(err.response?.data?.error || "Failed to process backend donation");
     } finally {
       setDonating(false);
     }
@@ -187,7 +228,7 @@ export default function CampaignDetail() {
 
     try {
       setDonating(true);
-      setError("");
+      setActionError("");
 
       let txHash = undefined;
 
@@ -216,7 +257,7 @@ export default function CampaignDetail() {
       fetchCampaign();
     } catch (err: any) {
       console.error("Confirmation error:", err);
-      setError(err.response?.data?.error || err.message || "Failed to confirm milestone");
+      setActionError(err.response?.data?.error || err.message || "Failed to confirm milestone");
     } finally {
       setDonating(false);
     }
@@ -333,9 +374,9 @@ export default function CampaignDetail() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-10 mt-8 relative z-10">
-        {error && (
+        {actionError && (
           <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-6 bg-red-500/10 border border-red-500/30 rounded-xl p-4">
-            <p className="text-red-300 font-medium text-sm text-center">{error}</p>
+            <p className="text-red-300 font-medium text-sm text-center">{actionError}</p>
           </motion.div>
         )}
 
@@ -400,7 +441,7 @@ export default function CampaignDetail() {
                   <div>
                     <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Treatment Facility</p>
                     <p className="text-white font-medium flex items-center gap-2">
-                      {campaign.hospitalId?.hospitalName || "Not assigned"}
+                      {campaign.hospitalId?.hospitalName || campaign.hospitalId?.name || "Not assigned"}
                       {campaign.hospitalId?.verified && (
                         <FiCheckCircle className="text-emerald-400 w-4 h-4" />
                       )}
@@ -460,14 +501,34 @@ export default function CampaignDetail() {
                           <span className="text-lg font-bold text-white block">
                             {m.targetAmount.toFixed(2)} ETH
                           </span>
-                          {!isCompleted && campaign.status === "active" && (
-                            <button
-                               onClick={() => handleConfirmMilestone(idx)}
-                               disabled={donating}
-                               className="mt-2 text-xs bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md hover:bg-emerald-500/40 disabled:opacity-50 transition-colors"
-                            >
-                               {donating ? "Processing..." : "Confirm (Hospital)"}
-                            </button>
+                          {!isCompleted && campaign.status === "active" && user?.role === "hospital" && (
+                            <div className="flex flex-col gap-1 items-end mt-2">
+                              <button
+                                 onClick={() => handleConfirmMilestone(idx)}
+                                 disabled={donating}
+                                 className="text-[10px] sm:text-xs bg-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded-md hover:bg-emerald-500/40 disabled:opacity-50 transition-colors w-full sm:w-auto text-center"
+                              >
+                                 {donating ? "Processing..." : "Confirm (Hospital)"}
+                              </button>
+                              <button
+                                 onClick={async () => {
+                                   try {
+                                     setDonating(true);
+                                     await api.post(`/api/milestones/${id}/confirm`, { milestoneIndex: idx });
+                                     alert("Backend test milestone confirmed!");
+                                     fetchCampaign();
+                                   } catch (err: any) {
+                                     alert(err.response?.data?.error || "Error bypassing to backend");
+                                   } finally {
+                                     setDonating(false);
+                                   }
+                                 }}
+                                 disabled={donating}
+                                 className="text-[10px] bg-slate-800 text-slate-300 px-3 py-1.5 rounded-md hover:bg-slate-700 disabled:opacity-50 transition-colors w-full sm:w-auto text-center"
+                              >
+                                 Test Bypass (Backend)
+                              </button>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -593,6 +654,23 @@ export default function CampaignDetail() {
                 </div>
               </div>
 
+              {/* Campaign Expiry Section */}
+              {campaign.expiresAt && campaign.status === "active" && (
+                <div className="mb-6 flex items-center justify-center gap-2 p-3 bg-slate-900/50 rounded-xl border border-white/5 text-sm text-slate-300 font-medium">
+                  {new Date(campaign.expiresAt).getTime() > Date.now() ? (
+                    <>
+                      <FiClock className="w-4 h-4 text-amber-400" />
+                      {Math.ceil((new Date(campaign.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24))} Days Remaining
+                    </>
+                  ) : (
+                    <>
+                      <FiAlertTriangle className="w-4 h-4 text-rose-400" />
+                      Campaign Expired
+                    </>
+                  )}
+                </div>
+              )}
+
               {/* Web3 Contract Status */}
               {campaign.smartContractAddress ? (
                 <div className="mb-8 p-4 bg-emerald-500/10 rounded-2xl border border-emerald-500/20 text-center relative overflow-hidden">
@@ -675,6 +753,19 @@ export default function CampaignDetail() {
                       </p>
                     </div>
                   )}
+
+                  {/* Backend testing bypass button */}
+                  <div className="pt-4 border-t border-white/5 mt-4">
+                    <button
+                      type="button"
+                      onClick={handleDonateDirect}
+                      disabled={donating}
+                      className="w-full px-4 py-3 bg-slate-800 border border-slate-600 text-slate-300 font-medium rounded-xl hover:bg-slate-700 transition-all text-sm flex items-center justify-center gap-2"
+                    >
+                      <FiDollarSign className="w-4 h-4 text-emerald-400" />
+                      Test Donate (Backend Bypass)
+                    </button>
+                  </div>
                 </form>
               ) : (
                 <div className="text-center py-6 px-4 bg-slate-900/50 rounded-2xl border border-white/5 border-dashed">

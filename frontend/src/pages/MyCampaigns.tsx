@@ -41,7 +41,12 @@ export default function MyCampaigns() {
     try {
       setLoading(true);
       const user = JSON.parse(localStorage.getItem("user") || "{}");
-      const response = await api.get(`/api/campaigns?patientId=${user.id}`);
+      let response;
+      if (user.role === "hospital") {
+        response = await api.get("/api/milestones/hospital/my-campaigns");
+      } else {
+        response = await api.get(`/api/campaigns?patientId=${user.id}`);
+      }
       setCampaigns(response.data.campaigns || []);
     } catch (err: any) {
       console.error("Failed to fetch campaigns:", err);

@@ -238,7 +238,7 @@ router.post('/signup', async (req, res) => {
       password,
       name,
       role,
-      walletAddress,
+      walletAddress: walletAddress || undefined,
     });
 
     await newUser.save();
@@ -462,6 +462,48 @@ router.post('/verify-wallet', authMiddleware, async (req, res) => {
     res.status(500).json({ 
       error: `Failed to verify wallet: ${error.message}` 
     });
+  }
+});
+
+// @route   PUT /api/auth/link-wallet
+// @desc    Save wallet address to user profile (no signature required)
+// @access  Private
+router.put('/link-wallet', authMiddleware, async (req, res) => {
+  try {
+    const { walletAddress } = req.body;
+
+    if (!walletAddress) {
+      return res.status(400).json({ error: 'Wallet address is required' });
+    }
+
+    if (!/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
+      return res.status(400).json({ error: 'Invalid wallet address format' });
+    }
+
+    // Check if wallet is already linked to another account
+    const existingWallet = await User.findOne({
+      walletAddress: walletAddress,
+      _id: { $ne: req.user.userId },
+    }).select('_id');
+    if (existingWallet) {
+      return res.status(400).json({ error: 'Wallet already linked to another account' });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user.userId,
+      {
+        walletAddress,
+        updatedAt: Date.now(),
+      },
+      { new: true }
+    ).select('-password');
+
+    res.json({
+      message: 'Wallet linked successfully',
+      user,
+    });
+  } catch (error) {
+    res.status(500).json({ error: `Failed to link wallet: ${error.message}` });
   }
 });
 

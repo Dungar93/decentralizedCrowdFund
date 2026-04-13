@@ -352,39 +352,87 @@ export default function Milestones() {
 
                             <div className="w-full lg:w-auto flex flex-col sm:flex-row gap-3">
                               {isPending && isHospital && (
-                                <button
-                                  onClick={() => confirmMilestone(campaign._id, index)}
-                                  disabled={
-                                    processingAction?.type === "confirm" &&
-                                    processingAction?.campaignId === campaign._id &&
-                                    processingAction?.index === index
-                                  }
-                                  className="px-6 py-3 bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-bold rounded-xl hover:shadow-[0_0_20px_rgba(99,102,241,0.4)] transition-all disabled:opacity-50 w-full lg:w-auto flex items-center justify-center gap-2"
-                                >
-                                  {processingAction?.type === "confirm" ? (
-                                    <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Verifying</>
-                                  ) : (
-                                    <><FiCheckCircle /> Verify Completion</>
-                                  )}
-                                </button>
+                                <div className="flex flex-col gap-2 w-full lg:w-auto">
+                                  <button
+                                    onClick={() => confirmMilestone(campaign._id, index)}
+                                    disabled={
+                                      processingAction?.type === "confirm" &&
+                                      processingAction?.campaignId === campaign._id &&
+                                      processingAction?.index === index
+                                    }
+                                    className="px-6 py-3 bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-bold rounded-xl hover:shadow-[0_0_20px_rgba(99,102,241,0.4)] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                                  >
+                                    {processingAction?.type === "confirm" ? (
+                                      <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Verifying</>
+                                    ) : (
+                                      <><FiCheckCircle /> Verify Completion</>
+                                    )}
+                                  </button>
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        setProcessingAction({ type: "confirm", campaignId: campaign._id, index });
+                                        await api.post(`/api/milestones/${campaign._id}/confirm`, { milestoneIndex: index });
+                                        alert("Backend test milestone confirmed!");
+                                        fetchCampaigns();
+                                      } catch (err: any) {
+                                        alert(err.response?.data?.error || "Error");
+                                      } finally { 
+                                        setProcessingAction(null); 
+                                      }
+                                    }}
+                                    disabled={
+                                      processingAction?.type === "confirm" &&
+                                      processingAction?.campaignId === campaign._id &&
+                                      processingAction?.index === index
+                                    }
+                                    className="px-6 py-3 bg-slate-800 border border-slate-600 text-slate-300 font-bold rounded-xl hover:bg-slate-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2 text-sm"
+                                  >
+                                    Test Bypass (Backend)
+                                  </button>
+                                </div>
                               )}
 
                               {isConfirmed && (isAdmin || user.role === "patient") && (
-                                <button
-                                  onClick={() => releaseMilestone(campaign._id, index)}
-                                  disabled={
-                                    processingAction?.type === "release" &&
-                                    processingAction?.campaignId === campaign._id &&
-                                    processingAction?.index === index
-                                  }
-                                  className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold rounded-xl hover:shadow-[0_0_20px_rgba(16,185,129,0.4)] transition-all disabled:opacity-50 w-full lg:w-auto flex items-center justify-center gap-2"
-                                >
-                                  {processingAction?.type === "release" ? (
-                                    <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Processing Tx</>
-                                  ) : (
-                                    <><FiDollarSign /> Release Funds</>
-                                  )}
-                                </button>
+                                <div className="flex flex-col gap-2 w-full lg:w-auto">
+                                  <button
+                                    onClick={() => releaseMilestone(campaign._id, index)}
+                                    disabled={
+                                      processingAction?.type === "release" &&
+                                      processingAction?.campaignId === campaign._id &&
+                                      processingAction?.index === index
+                                    }
+                                    className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold rounded-xl hover:shadow-[0_0_20px_rgba(16,185,129,0.4)] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                                  >
+                                    {processingAction?.type === "release" ? (
+                                      <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Processing Tx</>
+                                    ) : (
+                                      <><FiDollarSign /> Release Funds</>
+                                    )}
+                                  </button>
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        setProcessingAction({ type: "release", campaignId: campaign._id, index });
+                                        await api.post(`/api/milestones/${campaign._id}/release`, { milestoneIndex: index });
+                                        alert("Backend test funds released!");
+                                        fetchCampaigns();
+                                      } catch (err: any) {
+                                        alert(err.response?.data?.error || "Error");
+                                      } finally { 
+                                        setProcessingAction(null); 
+                                      }
+                                    }}
+                                    disabled={
+                                      processingAction?.type === "release" &&
+                                      processingAction?.campaignId === campaign._id &&
+                                      processingAction?.index === index
+                                    }
+                                    className="px-6 py-3 bg-slate-800 border border-slate-600 text-slate-300 font-bold rounded-xl hover:bg-slate-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2 text-sm"
+                                  >
+                                    Test Bypass (Backend)
+                                  </button>
+                                </div>
                               )}
                               
                               {isReleased && (

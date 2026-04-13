@@ -28,6 +28,9 @@ const { auditLogMiddleware } = require("./middleware/auth");
 // Import indexer daemon
 const { startIndexer } = require("./utils/indexer");
 
+// Import campaign expiry cron job
+const { startExpiryJob } = require("./utils/campaignExpiry");
+
 // Import logger
 const logger = require("./utils/logger");
 
@@ -93,6 +96,7 @@ mongoose
     console.log("✅ MongoDB connected");
     if (!isTestEnv) {
       startIndexer(30); // Poll every 30 seconds
+      startExpiryJob(60); // Check for expired campaigns every 60 minutes
     }
   })
   .catch((err) => {

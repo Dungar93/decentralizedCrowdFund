@@ -235,6 +235,9 @@ router.post('/', authMiddleware, roleMiddleware(['patient']), upload.array('docu
     }
 
     // Create campaign
+    const expiresAtDate = new Date();
+    expiresAtDate.setDate(expiresAtDate.getDate() + 90); // Expire in 90 days
+
     const campaign = await Campaign.create({
       title: cleanTitle,
       description: cleanDescription,
@@ -251,6 +254,7 @@ router.post('/', authMiddleware, roleMiddleware(['patient']), upload.array('docu
         targetAmount: m.targetAmount,
         status: 'pending',
       })),
+      expiresAt: expiresAtDate,
     });
 
     // Update risk assessment with campaign ID
@@ -616,7 +620,7 @@ router.post('/:id/deploy-contract', authMiddleware, roleMiddleware(['admin']), a
       campaignId: campaign._id,
       contractAddress: deploymentResult.contractAddress,
       transactionHash: deploymentResult.transactionHash,
-      network: process.env.RPC_URL?.includes('polygon') ? 'polygon' : 'sepolia',
+      network: process.env.RPC_URL?.includes('polygon') ? 'polygon' : (process.env.RPC_URL?.includes('127.0.0.1') || process.env.RPC_URL?.includes('localhost') || !process.env.RPC_URL ? 'hardhat' : 'sepolia'),
       patientAddress: patientWallet,
       hospitalAddress: hospitalWallet,
       milestones: campaign.milestones.map(m => ({

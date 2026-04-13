@@ -404,7 +404,7 @@ router.get('/audit-logs/export', async (req, res) => {
 
     const logs = await AuditLog.find({
       createdAt: { $gte: start, $lte: end }
-    }).sort({ createdAt: 1 });
+    }).sort({ createdAt: 1 }).lean();
 
     // Format for export
     const exportData = logs.map(log => ({
@@ -440,7 +440,7 @@ router.get('/contracts', async (req, res) => {
     const contracts = await SmartContract.find()
       .populate({
         path: 'campaignId',
-        select: 'title status patientId hospitalId'
+        select: 'title status patientId hospitalId targetAmount'
       })
       .sort({ deployedAt: -1, _id: -1 });
 

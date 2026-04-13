@@ -7,6 +7,7 @@ import {
   onNetworkChanged,
   removeListeners,
 } from "../../utils/web3";
+import api from "../../services/api";
 
 interface WalletConnectButtonProps {
   onConnect?: (address: string) => void;
@@ -76,6 +77,17 @@ export default function WalletConnectButton({ onConnect, compact = false }: Wall
     }
   };
 
+  const saveWalletToBackend = async (address: string) => {
+    try {
+      const token = localStorage.getItem("token");
+      if (token && address) {
+        await api.put("/api/auth/link-wallet", { walletAddress: address });
+      }
+    } catch (err) {
+      console.error("Failed to save wallet to backend:", err);
+    }
+  };
+
   const handleConnect = async () => {
     setError("");
     if (!isMetaMaskInstalled()) {
@@ -88,6 +100,7 @@ export default function WalletConnectButton({ onConnect, compact = false }: Wall
       localStorage.setItem("walletAddress", address);
       onConnect?.(address);
       await refreshChainId();
+      await saveWalletToBackend(address);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -199,6 +212,7 @@ export default function WalletConnectButton({ onConnect, compact = false }: Wall
             localStorage.setItem("walletAddress", mockAddress);
             setError("");
             onConnect?.(mockAddress);
+            saveWalletToBackend(mockAddress);
           }}
           className="w-full px-4 py-3 bg-slate-800 border border-slate-600 text-slate-200 text-sm font-medium rounded-lg hover:bg-slate-700 transition"
         >
