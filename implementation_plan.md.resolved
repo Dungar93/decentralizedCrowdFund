@@ -1,0 +1,86 @@
+# Fix MetaMask, KYC Docs, Milestones & Donation Routes
+
+## Summary of Investigation
+
+After reviewing all backend routes, frontend pages, API config, and server setup, here are the findings:
+
+### Issues Found
+
+| # | Issue | Root Cause | Fix |
+|---|-------|-----------|-----|
+| 1 | **Admin can't confirm milestones** | Backend restricts to [hospital](file:///home/dungar/decentralizedCrowdFund/ai-service/main.py#702-753) role only (line 34 of [milestones.js](file:///home/dungar/decentralizedCrowdFund/backend/routes/milestones.js)). Frontend only shows button for [hospital](file:///home/dungar/decentralizedCrowdFund/ai-service/main.py#702-753) (line 504 of [CampaignDetail.tsx](file:///home/dungar/decentralizedCrowdFund/frontend/src/pages/CampaignDetail.tsx)). | Add `admin` to allowed roles in both backend and frontend. |
+| 2 | **KYC documents not visible** | KYC route `GET /api/kyc/:id/documents/:docIndex` exists and looks correct (stores mimetype). Likely the URL path is working — need to verify in browser. If failing, it may be an encryption key issue. | Test in browser first. |
+| 3 | **Donation backend-bypass insufficient funds** | `donate-direct` route uses the server's Hardhat account to send ETH. If that account ran out of ETH (100 ETH initial balance minus gas/donations), it fails with "insufficient funds". | This is expected — the Hardhat node needs funded accounts. Not a code bug. |
+| 4 | **MetaMask donation fails** | The MetaMask flow works correctly — connects wallet, sends `donate()` to contract, backend verifies tx. If MetaMask has insufficient ETH, it will fail. | Not a bug — MetaMask needs ETH. The Hardhat node provides test accounts. |
+
+### Routes Verified ✅
+
+All backend routes are correctly registered in [server.js](file:///home/dungar/decentralizedCrowdFund/backend/server.js/home/dungar/decentralizedCrowdFund/backend/server.js):
+- `/api/auth` → [auth.js](file:///home/dungar/decentralizedCrowdFund/backend/routes/auth.js) ✅
+- `/api/campaigns` → [campaigns.js](file:///home/dungar/decentralizedCrowdFund/backend/routes/campaigns.js) ✅
+- `/api/donations` → [donations.js](file:///home/dungar/decentralizedCrowdFund/backend/routes/donations.js) ✅
+- `/api/milestones` → [milestones.js](file:///home/dungar/decentralizedCrowdFund/backend/routes/milestones.js) ✅
+- `/api/admin` → [admin.js](file:///home/dungar/decentralizedCrowdFund/backend/routes/admin.js) ✅
+- `/api/kyc` → [kyc.js](file:///home/dungar/decentralizedCrowdFund/backend/routes/kyc.js) ✅
+- `/api/hospitals` → [hospitals.js](file:///home/dungar/decentralizedCrowdFund/backend/routes/hospitals.js) ✅
+- `/api/analytics` → [analytics.js](file:///home/dungar/decentralizedCrowdFund/backend/routes/analytics.js) ✅
+- `/api/transactions` → [transactions.js](file:///home/dungar/decentralizedCrowdFund/backend/routes/transactions.js) ✅
+
+API interceptor in [api.ts](file:///home/dungar/decentralizedCrowdFund/frontend/src/services/api.ts) correctly strips `/api/` prefix from URLs and adds auth token.
+
+---
+
+## Proposed Changes
+
+### Milestone Confirmation
+
+#### [MODIFY] [milestones.js](file:///home/dungar/decentralizedCrowdFund/backend/routes/milestones.js)
+
+Add `admin` role to the milestone confirmation endpoint role check. When admin confirms, skip the hospital wallet verification since admin confirms off-chain via the backend-signed fallback.
+
+```diff
+- router.post('/:campaignId/confirm', authMiddleware, roleMiddleware(['hospital']), async (req, res) => {
++ router.post('/:campaignId/confirm', authMiddleware, roleMiddleware(['hospital', 'admin']), async (req, res) => {
+```
+
+Also skip the hospital ownership check when the caller is admin (admin should be able to confirm any campaign's milestones).
+
+#### [MODIFY] [CampaignDetail.tsx](file:///home/dungar/decentralizedCrowdFund/frontend/src/pages/CampaignDetail.tsx)
+
+Show milestone confirm buttons for both [hospital](file:///home/dungar/decentralizedCrowdFund/ai-service/main.py#702-753) and `admin` roles:
+
+```diff
+- {!isCompleted && campaign.status === "active" && user?.role === "hospital" && (
++ {!isCompleted && campaign.status === "active" && (user?.role === "hospital" || user?.role === "admin") && (
+```
+
+---
+
+### KYC Document Viewer (Defensive Fix)
+
+#### [MODIFY] [AdminKYCReview.tsx](file:///home/dungar/decentralizedCrowdFund/frontend/src/pages/AdminKYCReview.tsx)
+
+The current code looks correct, but I'll add better error handling and a loading state for document opening to surface any hidden errors.
+
+---
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Milestone confirm for admin**: Currently only hospitals can confirm milestones (by design — hospitals verify treatment completion). Should admins really be able to confirm milestones directly? This bypasses the hospital verification step. I'll add it since you requested it, but wanted to flag this.
+
+> [!NOTE]
+> **Donation MetaMask/balance issue**: The Hardhat node gives each test account 10,000 ETH. If you imported one of these accounts into MetaMask and configured the Hardhat network (Chain ID 31337, RPC http://127.0.0.1:8545), you'll have plenty of test ETH. The "backend bypass" donation uses the server's default Hardhat signer — if that ran out, restart `npx hardhat node` to reset balances.
+
+## Verification Plan
+
+### Browser Testing
+1. Log in as admin → go to Campaign Detail page → verify milestone confirm buttons appear
+2. Click confirm on a pending milestone → verify it works
+3. Go to KYC Review → click a document → verify it opens correctly
+4. Log in as donor → connect MetaMask → attempt a donation
+5. Verify backend bypass donation works when contract is deployed
+
+### Existing Tests
+- Run `cd backend && npx jest tests/backend.test.js` — covers auth, campaigns, health, encryption
+- Run `cd backend && npx jest tests/donations.test.js` — covers donation CRUD and refund flows

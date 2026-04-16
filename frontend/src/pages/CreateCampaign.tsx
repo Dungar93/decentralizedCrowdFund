@@ -70,9 +70,7 @@ export default function CreateCampaign() {
   };
 
   const [milestones, setMilestones] = useState<Milestone[]>([
-    { description: "Hospital Admission & Initial Tests", targetAmount: 0 },
-    { description: "Primary Surgery / Procedure", targetAmount: 0 },
-    { description: "Post-op Care & Medications", targetAmount: 0 },
+    { description: "", targetAmount: 0 },
   ]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {

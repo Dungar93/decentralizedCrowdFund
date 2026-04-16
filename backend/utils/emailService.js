@@ -329,7 +329,7 @@ const sendHospitalAssignedEmail = async (hospitalEmail, campaignTitle, patientNa
         <p style="margin: 8px 0;"><strong>Patient:</strong> ${patientName}</p>
       </div>
       <p>You will receive funds directly from the smart contract when milestones are confirmed.</p>
-      <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/hospital/dashboard"
+      <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/hospital-profile"
          style="display: inline-block; padding: 12px 24px; background-color: #7c3aed; color: white; text-decoration: none; border-radius: 6px; margin-top: 16px;">
         View Dashboard
       </a>

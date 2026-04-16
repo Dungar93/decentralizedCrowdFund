@@ -4,7 +4,7 @@ const RiskAssessmentSchema = new mongoose.Schema({
   campaignId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Campaign',
-    required: true,
+    default: null,
   },
   riskScore: {
     type: Number,
@@ -16,6 +16,25 @@ const RiskAssessmentSchema = new mongoose.Schema({
     type: String,
     enum: ['low', 'medium', 'high'],
     required: true,
+  },
+  // SRS v2.0 scoring breakdown - individual components
+  tamperingScore: {
+    type: Number,
+    min: 0,
+    max: 100,
+    default: 0,
+  },
+  aiGeneratedScore: {
+    type: Number,
+    min: 0,
+    max: 100,
+    default: 0,
+  },
+  metadataMismatchScore: {
+    type: Number,
+    min: 0,
+    max: 100,
+    default: 0,
   },
   aiVerificationDetails: {
     ocrConfidence: Number, // 0-100

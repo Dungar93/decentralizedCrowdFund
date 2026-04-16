@@ -70,6 +70,30 @@ router.post('/', authMiddleware, roleMiddleware(['patient']), upload.array('docu
       return res.status(400).json({ error: 'Title and description are required' });
     }
 
+    // Validate minimum length for meaningful content
+    if (cleanTitle.length < 10) {
+      return res.status(400).json({ error: 'Title must be at least 10 characters and describe your medical condition' });
+    }
+    if (cleanDescription.length < 50) {
+      return res.status(400).json({ error: 'Description must be at least 50 characters. Please provide details about your medical condition and treatment needs.' });
+    }
+
+    // Basic medical context validation - title/description should mention medical terms
+    const medicalContextKeywords = [
+      'treatment', 'surgery', 'hospital', 'medical', 'doctor', 'patient',
+      'diagnosis', 'transplant', 'cancer', 'heart', 'kidney', 'liver',
+      'operation', 'therapy', 'disease', 'condition', 'health', 'clinic',
+      'medication', 'procedure', 'emergency', 'icu', 'chronic', 'acute'
+    ];
+    const combinedText = (cleanTitle + ' ' + cleanDescription).toLowerCase();
+    const keywordMatches = medicalContextKeywords.filter(kw => combinedText.includes(kw));
+
+    if (keywordMatches.length < 1) {
+      return res.status(400).json({
+        error: 'Campaign must describe a medical condition or treatment. Please include medical terms like: treatment, surgery, hospital, diagnosis, etc.'
+      });
+    }
+
     if (!targetAmount || parseFloat(targetAmount) <= 0) {
       return res.status(400).json({ error: 'Target amount must be greater than 0' });
     }
@@ -107,17 +131,26 @@ router.post('/', authMiddleware, roleMiddleware(['patient']), upload.array('docu
 
     if (req.files.length > 0) {
       try {
+        console.log('📁 Files to process:', req.files.length);
         const FormData = require('form-data');
+        const { Readable } = require('stream');
         const aiForm = new FormData();
-        req.files.forEach((file) => {
-          aiForm.append('files', fs.createReadStream(file.path));
+        req.files.forEach((file, idx) => {
+          console.log(`📄 File ${idx}:`, file.path, 'Size:', file.size);
+          // Read file as stream and append to FormData
+          const fileStream = fs.createReadStream(file.path);
+          console.log(`✅ Created read stream for file: ${file.originalname}`);
+          aiForm.append('files', fileStream, { filename: file.originalname });
         });
         aiForm.append('hospital_verified', hospitalVerified ? 'true' : 'false');
 
-        const aiRes = await axios.post('http://localhost:8001/verify', aiForm, {
+        const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8001';
+        console.log('🚀 Calling AI service:', aiServiceUrl + '/verify');
+        const aiRes = await axios.post(`${aiServiceUrl}/verify`, aiForm, {
           headers: aiForm.getHeaders(),
           timeout: 45000, // 45 second timeout per NFR-1
         });
+        console.log('✅ AI service response:', aiRes.status);
 
         // AI service returns { risk_scores: { final_risk_score, ... }, verdict, ... }
         const riskScore =
@@ -128,46 +161,64 @@ router.post('/', authMiddleware, roleMiddleware(['patient']), upload.array('docu
           aiRes.data?.risk_scores?.finalRiskScore;
         const verdict = aiRes.data?.verdict;
 
+        console.log('📊 Risk Score extracted:', riskScore);
+        console.log('📋 Verdict:', verdict);
+
         if (typeof riskScore !== 'number') {
+          console.error('❌ ERROR: riskScore is not a number!', typeof riskScore, riskScore);
+          console.error('❌ Full response:', JSON.stringify(aiRes.data, null, 2));
           throw new Error('AI verification returned unexpected payload (missing final risk score).');
         }
+        console.log('✅ Risk score is valid number');
 
         // Determine risk category and recommendation
+        // ALL campaigns require admin review - AI score helps admins decide
         let riskCategory, recommendation, manualReviewRequired;
+        campaignStatus = 'pending_verification'; // Always require admin review
 
         if (riskScore < 40) {
           riskCategory = 'low';
           recommendation = 'approve';
-          manualReviewRequired = false;
-          campaignStatus = 'active'; // Auto-approve low risk
+          manualReviewRequired = true; // Admin still reviews low risk
         } else if (riskScore < 70) {
           riskCategory = 'medium';
-          recommendation = 'escalate';
-          manualReviewRequired = false;
-          campaignStatus = 'active'; // Medium risk shows advisory
+          recommendation = 'review'; // Changed from 'escalate' to be clearer
+          manualReviewRequired = true;
         } else {
           riskCategory = 'high';
-          recommendation = 'escalate';
+          recommendation = 'reject'; // High risk recommendation
           manualReviewRequired = true;
-          campaignStatus = 'pending_verification'; // High risk needs admin review
         }
 
-        // Create risk assessment
+        // Create risk assessment with full AI verification details
         const riskAssessment = await RiskAssessment.create({
           campaignId: null, // Will be updated after campaign creation
           riskScore,
           riskCategory,
           recommendation,
           manualReviewRequired,
+          // SRS v2.0 scoring breakdown
+          tamperingScore: aiRes.data?.risk_scores?.tampering_score || 0,
+          aiGeneratedScore: aiRes.data?.risk_scores?.ai_probability_score || 0,
+          metadataMismatchScore: aiRes.data?.risk_scores?.metadata_mismatch_score || 0,
+          // Legacy aiVerificationDetails for backward compatibility
           aiVerificationDetails: {
-            keywordMatch: 100 - (riskScore * 0.4), // Approximate mapping
-            fileIntegrityScore: 100 - (riskScore * 0.3),
+            ocrConfidence: aiRes.data?.medical_keyword_coverage?.percentage || 0,
+            metadataConsistency: 100 - (aiRes.data?.metadata_analysis?.score || 0),
+            keywordMatch: aiRes.data?.medical_keyword_coverage?.percentage || 0,
+            fileIntegrityScore: 100 - (aiRes.data?.risk_scores?.tampering_score || 0),
           },
           documentAnalysis: req.files.map((f, i) => ({
             documentType: documentTypes[i],
             fileHash: documents[i].hash,
             fileSize: f.size,
-            processingTime: aiRes.data.details ? aiRes.data.details.length * 0.5 : 5,
+            processingTime: aiRes.data?.processing_times?.total ? aiRes.data.processing_times.total / req.files.length : 5,
+          })),
+          // Store full AI response for detailed review
+          fraudIndicators: (aiRes.data?.details || []).map((detail, idx) => ({
+            indicator: `check_${idx}`,
+            severity: detail.toLowerCase().includes('error') || detail.toLowerCase().includes('detected') ? 'high' : 'low',
+            details: detail,
           })),
         });
 
@@ -184,9 +235,72 @@ router.post('/', authMiddleware, roleMiddleware(['patient']), upload.array('docu
         });
 
       } catch (aiError) {
-        console.error('AI verification error:', aiError.message);
+        console.error('🔴 AI VERIFICATION ERROR:', aiError.message);
+        console.error('🔴 Error Code:', aiError.code);
+        console.error('🔴 Response Status:', aiError.response?.status);
+        console.error('🔴 Response Data:', aiError.response?.data);
+        console.error('🔴 Full Stack:', aiError.stack);
         // Continue with campaign creation but mark for manual review
         campaignStatus = 'pending_verification';
+
+        // Create a placeholder risk assessment for manual review
+        try {
+          const placeholderRisk = await RiskAssessment.create({
+            campaignId: null,
+            riskScore: 50, // Medium risk by default
+            riskCategory: 'medium',
+            recommendation: 'escalate',
+            manualReviewRequired: true,
+            tamperingScore: 0,
+            aiGeneratedScore: 0,
+            metadataMismatchScore: 0,
+            aiVerificationDetails: {
+              ocrConfidence: 0,
+              metadataConsistency: 0,
+              keywordMatch: 0,
+              fileIntegrityScore: 0,
+            },
+            fraudIndicators: [{
+              indicator: 'ai_service_unavailable',
+              severity: 'medium',
+              details: `AI verification failed: ${aiError.message}`,
+            }],
+          });
+          riskAssessmentId = placeholderRisk._id;
+          console.log('✅ Created placeholder risk assessment:', riskAssessmentId);
+        } catch (placeholderError) {
+          console.error('❌ Failed to create placeholder risk assessment:', placeholderError.message);
+        }
+      }
+    } else {
+      // No files uploaded - create a placeholder risk assessment
+      campaignStatus = 'pending_verification';
+      try {
+        const placeholderRisk = await RiskAssessment.create({
+          campaignId: null,
+          riskScore: 50, // Medium risk by default
+          riskCategory: 'medium',
+          recommendation: 'escalate',
+          manualReviewRequired: true,
+          tamperingScore: 0,
+          aiGeneratedScore: 0,
+          metadataMismatchScore: 0,
+          aiVerificationDetails: {
+            ocrConfidence: 0,
+            metadataConsistency: 0,
+            keywordMatch: 0,
+            fileIntegrityScore: 0,
+          },
+          fraudIndicators: [{
+            indicator: 'no_documents_uploaded',
+            severity: 'medium',
+            details: 'Campaign created without supporting documents - manual review required',
+          }],
+        });
+        riskAssessmentId = placeholderRisk._id;
+        console.log('✅ Created placeholder risk assessment (no files):', riskAssessmentId);
+      } catch (placeholderError) {
+        console.error('❌ Failed to create placeholder risk assessment:', placeholderError.message);
       }
     }
 
@@ -701,7 +815,12 @@ router.post('/:id/admin-review', authMiddleware, roleMiddleware(['admin']), asyn
       return res.status(400).json({ error: 'Decision must be approve or reject' });
     }
 
-    const campaign = await Campaign.findById(req.params.id).populate('patientId');
+    const campaign = await Campaign.findById(req.params.id)
+      .populate('patientId')
+      .populate({
+        path: 'riskAssessmentId',
+        select: '__v' // Include all fields
+      });
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' });
     }
@@ -763,9 +882,14 @@ router.post('/:id/admin-review', authMiddleware, roleMiddleware(['admin']), asyn
       logger.info(`Emitted campaign:reviewed event for campaign ${campaign._id}`);
     }
 
+    // Re-fetch campaign with updated risk assessment
+    const updatedCampaign = await Campaign.findById(campaign._id)
+      .populate('patientId')
+      .populate('riskAssessmentId');
+
     res.json({
       message: `Campaign ${decision}d successfully`,
-      campaign,
+      campaign: updatedCampaign,
     });
   } catch (error) {
     res.status(500).json({ error: `Failed to review campaign: ${error.message}` });

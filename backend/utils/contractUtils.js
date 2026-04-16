@@ -231,25 +231,35 @@ function getContractInstance(contractAddress, customSigner = null) {
 async function confirmMilestoneOnChain(contractAddress, milestoneIndex, hospitalAddressOrWallet) {
   return executeWithRetry(async () => {
     const { signer, provider } = getProviderAndSigner();
+    const rpcUrl = process.env.RPC_URL || 'http://127.0.0.1:8545';
+    const isLocalHardhat = rpcUrl.includes('127.0.0.1') || rpcUrl.includes('localhost');
+
     let hospitalSigner;
 
     if (typeof hospitalAddressOrWallet === 'string') {
-      try {
-        console.log(`Impersonating hospital address ${hospitalAddressOrWallet} for testing bypass...`);
-        await provider.send("hardhat_impersonateAccount", [hospitalAddressOrWallet]);
-        hospitalSigner = await provider.getSigner(hospitalAddressOrWallet);
-        
-        // Give the impersonated account some ETH for gas just in case
-        await provider.send("hardhat_setBalance", [
-          hospitalAddressOrWallet,
-          "0xde0b6b3a7640000" // 1 ETH
-        ]);
-      } catch (err) {
-        console.error("Impersonation failed! Are you running on localhost/hardhat node?", err);
-        throw new Error("Failed to impersonate hospital address: " + err.message);
+      if (isLocalHardhat) {
+        // Local Hardhat node: impersonate the hospital address for testing
+        console.log(`Impersonating hospital address ${hospitalAddressOrWallet} for local testing bypass...`);
+        try {
+          await provider.send("hardhat_impersonateAccount", [hospitalAddressOrWallet]);
+          hospitalSigner = await provider.getSigner(hospitalAddressOrWallet);
+          await provider.send("hardhat_setBalance", [
+            hospitalAddressOrWallet,
+            "0xde0b6b3a7640000" // 1 ETH for gas
+          ]);
+        } catch (err) {
+          throw new Error("Failed to impersonate hospital address on local node: " + err.message);
+        }
+      } else {
+        // Production / testnet: backend CANNOT impersonate the hospital.
+        // The hospital must sign confirmMilestone() via MetaMask and submit the tx hash.
+        throw new Error(
+          "Backend milestone confirmation requires the hospital to sign via MetaMask on this network. " +
+          "Please have the hospital submit the on-chain transaction hash, then call this endpoint with it."
+        );
       }
     } else if (hospitalAddressOrWallet && hospitalAddressOrWallet.privateKey) {
-      // Real wallet scenario
+      // Real wallet scenario (managed hospital wallet with known private key)
       hospitalSigner = new ethers.Wallet(hospitalAddressOrWallet.privateKey, provider);
     } else {
       throw new Error("Missing hospital wallet or address to confirm milestone on-chain");
@@ -263,8 +273,8 @@ async function confirmMilestoneOnChain(contractAddress, milestoneIndex, hospital
 
     console.log(`Milestone confirmed in tx: ${receipt.hash}`);
 
-    // Stop impersonating
-    if (typeof hospitalAddressOrWallet === 'string') {
+    // Stop impersonating (local Hardhat only)
+    if (isLocalHardhat && typeof hospitalAddressOrWallet === 'string') {
       await provider.send("hardhat_stopImpersonatingAccount", [hospitalAddressOrWallet]).catch(() => {});
     }
 

@@ -145,8 +145,8 @@ describe('CreateCampaign Page', () => {
     fireEvent.click(screen.getByRole('button', { name: /continue/i }));
     await waitFor(() => expect(screen.getByText(/step 4 of 4/i)).toBeInTheDocument());
 
-    // Default milestone text is in an input value
-    expect(screen.getByDisplayValue(/Hospital Admission/i)).toBeInTheDocument();
+    // Default milestone row is present
+    expect(screen.getByPlaceholderText(/Initial hospitalization/i)).toBeInTheDocument();
   });
 
   it('Add Another Milestone button adds a new milestone row', async () => {

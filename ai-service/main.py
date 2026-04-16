@@ -26,23 +26,72 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 MEDICAL_KEYWORDS = {
     "diagnosis", "admission", "discharge", "treatment", "surgery",
     "hospital", "doctor", "patient", "bill", "report", "prescription",
-    "medication", "procedure", "insurance", "claim", "medical"
+    "medication", "procedure", "insurance", "claim", "medical",
+    "clinic", "physician", "nurse", "emergency", "icu", "operation",
+    "therapy", "disease", "infection", "cancer", "heart", "kidney",
+    "liver", "transplant", "blood", "x-ray", "mri", "ct scan", "ultrasound",
+    "laboratory", "pathology", "biopsy", "chemotherapy", "radiation",
+    "symptom", "chronic", "acute", "critical", "ventilator", "dialysis",
+    "ward", "opd", "ipd", "ambulance", "fracture", "wound", "fever",
+    "hemoglobin", "platelet", "serum", "urine", "stool", "ecg", "eeg",
+    "cbc", "rbc", "wbc", "hiv", "hepatitis", "diabetes", "bp",
+    "pulse", "oxygen", "saturation", "anesthesia", "stitches", "bandage"
 }
+
+# Minimum required medical keyword matches
+MIN_MEDICAL_KEYWORDS_REQUIRED = 4  # At least 4 medical keywords must appear
+
+# NON-MEDICAL RED FLAG keywords — if these appear, the document is suspicious
+NON_MEDICAL_RED_FLAGS = {
+    # Academic / assignment
+    "assignment", "homework", "semester", "exam", "quiz", "lecture",
+    "syllabus", "grade", "marks", "gpa", "cgpa", "professor",
+    "student", "university", "college", "school", "class",
+    "submission", "submitted by", "roll no", "enrollment",
+    "abstract", "introduction", "conclusion", "references",
+    "bibliography", "chapter", "thesis", "dissertation",
+    # Programming / tech
+    "def ", "function", "import ", "print(", "return ",
+    "class ", "const ", "var ", "let ", "console.log",
+    "algorithm", "data structure", "database", "sql",
+    "javascript", "python", "java", "html", "css",
+    "github", "repository", "commit", "pull request",
+    # Legal / business (unrelated)
+    "invoice", "purchase order", "quotation", "proforma",
+    "terms and conditions", "privacy policy",
+    # Random / filler
+    "lorem ipsum", "foo", "bar", "test document", "sample",
+    "placeholder", "dummy"
+}
+
+# Document structure markers expected in real medical documents
+MEDICAL_STRUCTURE_MARKERS = [
+    "date", "time", "mrn", "patient id", "case no", "reference",
+    "dr.", "dr ", "md", "hospital", "clinic", "reg no",
+    "ward", "bed no", "opd", "ipd", "department",
+    "uhid", "age", "sex", "gender", "weight",
+    "signature", "stamp", "seal", "registered"
+]
 
 # Document type keywords
 DOCUMENT_TYPE_KEYWORDS = {
-    "identity": ["aadhaar", "passport", "id card", "government id", "national id"],
-    "diagnosis": ["diagnosis", "test result", "lab report", "scan report", "pathology"],
-    "admission_letter": ["admission", "admit", "hospitalization", "bed assignment"],
-    "cost_estimate": ["estimate", "cost", "bill", "invoice", "amount", "rs.", "rupees"]
+    "identity": ["aadhaar", "passport", "id card", "government id", "national id",
+                 "voter", "pan card", "driving licence", "birth certificate"],
+    "diagnosis": ["diagnosis", "test result", "lab report", "scan report", "pathology",
+                  "blood test", "mri", "ct scan", "x-ray", "ultrasound", "biopsy"],
+    "admission_letter": ["admission", "admit", "hospitalization", "bed assignment",
+                         "indoor", "ipd", "ward", "emergency"],
+    "cost_estimate": ["estimate", "cost", "bill", "invoice", "amount", "rs.", "rupees",
+                      "total charges", "package cost", "advance"]
 }
 
-# Weights for risk score formula (SRS v2.0)
-# RiskScore = w1 × TamperingScore + w2 × AIProbability + w3 × MetadataMismatchScore
+# Weights for risk score formula (SRS v2.0 enhanced)
+# RiskScore = w1*Tampering + w2*AIContent + w3*Metadata + w4*Relevance
 WEIGHTS = {
-    "tampering": 0.35,      # w1 - Image tampering indicators
-    "ai_probability": 0.35, # w2 - AI-generated content probability
-    "metadata_mismatch": 0.30 # w3 - Cross-document metadata inconsistencies
+    "tampering": 0.15,         # w1 - Image tampering indicators
+    "ai_probability": 0.20,    # w2 - AI-generated content probability
+    "metadata_mismatch": 0.15, # w3 - Cross-document metadata inconsistencies
+    "relevance": 0.50          # w4 - Medical document relevance (DOMINANT)
 }
 
 def extract_text_from_pdf(pdf_path: str) -> str:
@@ -88,36 +137,61 @@ def check_image_tampering(file_path: str) -> dict:
     tampering_score = 0
 
     try:
-        # Check file size anomalies
         file_size = os.path.getsize(file_path)
-        if file_size < 10_000:  # Less than 10KB - suspicious
-            tampering_score += 30
-            tampering_indicators.append("Very small file size - possible compression artifacts")
 
-        # Check for metadata anomalies
-        img = Image.open(file_path)
-        info = img.info
+        # Very small files are suspicious
+        if file_size < 5_000:
+            tampering_score += 35
+            tampering_indicators.append("Extremely small file (< 5KB) — likely not a real scan")
+        elif file_size < 15_000:
+            tampering_score += 20
+            tampering_indicators.append("Very small file — suspicious for a medical document")
 
-        # Check if metadata has been stripped (common in edited images)
-        if not info or len(info) == 0:
-            tampering_score += 15
-            tampering_indicators.append("No EXIF metadata - possibly stripped")
+        # Try to open as image
+        try:
+            img = Image.open(file_path)
+            info = img.info
 
-        # Check for inconsistent dimensions
-        width, height = img.size
-        if width > 4000 or height > 4000:  # Unusually high resolution
-            tampering_score += 10
-            tampering_indicators.append("Unusually high resolution - possible upsampling")
+            # Metadata stripped?
+            if not info or len(info) == 0:
+                tampering_score += 15
+                tampering_indicators.append("No EXIF metadata — possibly stripped or digitally created")
 
-        # Check for compression artifacts (simple heuristic)
-        if file_path.endswith(('.jpg', '.jpeg')):
-            # High compression ratio might indicate manipulation
-            compression_ratio = file_size / (width * height)
-            if compression_ratio < 0.001:
+            width, height = img.size
+
+            # Unusually small resolution for a scanned document
+            if width < 400 or height < 400:
                 tampering_score += 20
-                tampering_indicators.append("High compression - quality degradation detected")
+                tampering_indicators.append("Very low resolution — unlikely a scanned medical document")
 
-        img.close()
+            # Unusually high resolution (possible upsampling)
+            if width > 4000 or height > 4000:
+                tampering_score += 10
+                tampering_indicators.append("Unusually high resolution — possible AI upsampling")
+
+            # Compression artifacts
+            if file_path.lower().endswith(('.jpg', '.jpeg')):
+                compression_ratio = file_size / (width * height) if (width * height) > 0 else 0
+                if compression_ratio < 0.001:
+                    tampering_score += 20
+                    tampering_indicators.append("Heavy JPEG compression — quality loss detected")
+
+            # Check for uniform/blank images (screenshots of empty docs)
+            try:
+                extrema = img.convert('L').getextrema()
+                if (extrema[1] - extrema[0]) < 10:
+                    tampering_score += 30
+                    tampering_indicators.append("Nearly blank/uniform image detected")
+            except:
+                pass
+
+            img.close()
+
+        except Exception:
+            # Not an image — could be a PDF, which is fine
+            if not file_path.lower().endswith('.pdf'):
+                tampering_score += 10
+                tampering_indicators.append("File could not be opened as image")
 
     except Exception as e:
         tampering_indicators.append(f"Analysis error: {str(e)}")
@@ -127,48 +201,155 @@ def check_image_tampering(file_path: str) -> dict:
         "indicators": tampering_indicators
     }
 
+def score_document_relevance(text: str) -> dict:
+    """
+    Score how relevant a document is to medical fundraising.
+    This is the MAIN filter — non-medical documents should score 70-100.
+    Returns relevance_risk_score (0=definitely medical, 100=definitely not medical).
+    """
+    indicators = []
+    score = 0
+    text_lower = text.lower() if text else ""
+
+    if not text or len(text.strip()) < 20:
+        return {
+            "score": 90,
+            "indicators": ["No readable text — cannot verify document authenticity"],
+            "medical_keywords_found": 0,
+            "red_flags_found": 0
+        }
+
+    # ── 1. Medical keyword matching ──────────────────────────────────
+    medical_matches = [kw for kw in MEDICAL_KEYWORDS if kw in text_lower]
+    med_count = len(medical_matches)
+
+    if med_count == 0:
+        score += 55
+        indicators.append("CRITICAL: Zero medical keywords found — not a medical document")
+    elif med_count < 2:
+        score += 45
+        indicators.append(f"Only {med_count} medical keyword found — extremely suspicious")
+    elif med_count < MIN_MEDICAL_KEYWORDS_REQUIRED:
+        score += 30
+        indicators.append(f"Only {med_count} medical keywords (need ≥{MIN_MEDICAL_KEYWORDS_REQUIRED})")
+    elif med_count < 6:
+        score += 15
+        indicators.append(f"Low medical content ({med_count} keywords)")
+    # Good medical content: no penalty
+
+    # ── 2. Non-medical red flag detection ───────────────────────────
+    red_flags = [kw for kw in NON_MEDICAL_RED_FLAGS if kw in text_lower]
+    rf_count = len(red_flags)
+
+    if rf_count >= 5:
+        score += 45
+        indicators.append(f"ALERT: {rf_count} non-medical red flags detected: {', '.join(red_flags[:8])}")
+        indicators.append("Document appears to be academic/technical — NOT a medical record")
+    elif rf_count >= 3:
+        score += 30
+        indicators.append(f"WARNING: {rf_count} non-medical terms detected: {', '.join(red_flags[:5])}")
+    elif rf_count >= 1:
+        score += 10
+        indicators.append(f"Minor: {rf_count} non-medical term(s): {', '.join(red_flags)}")
+
+    # ── 3. Medical document structure ───────────────────────────────
+    structure_hits = sum(1 for m in MEDICAL_STRUCTURE_MARKERS if m in text_lower)
+
+    if structure_hits == 0:
+        score += 25
+        indicators.append("No medical document structure (missing date, doctor, patient ID, etc.)")
+    elif structure_hits < 3:
+        score += 15
+        indicators.append(f"Weak document structure (only {structure_hits} markers found)")
+    elif structure_hits >= 6:
+        # Reward well-structured medical documents
+        score = max(0, score - 10)
+        indicators.append(f"Good document structure ({structure_hits} markers found)")
+
+    # ── 4. Document length check ────────────────────────────────────
+    if len(text) < 50:
+        score += 20
+        indicators.append("Extremely short content — insufficient for verification")
+    elif len(text) < 150:
+        score += 10
+        indicators.append("Short document — limited verification possible")
+
+    # ── 5. Ratio check: if red flags outnumber medical keywords ────
+    if rf_count > 0 and med_count > 0 and rf_count > med_count:
+        score += 15
+        indicators.append(f"Non-medical terms ({rf_count}) outnumber medical terms ({med_count})")
+    elif rf_count > 0 and med_count == 0:
+        score += 20
+        indicators.append("Non-medical content with zero medical terms — fraudulent document")
+
+    return {
+        "score": min(100, max(0, score)),
+        "indicators": indicators,
+        "medical_keywords_found": med_count,
+        "medical_keywords_matched": medical_matches[:15],
+        "red_flags_found": rf_count,
+        "red_flags_matched": red_flags[:10],
+        "structure_markers_found": structure_hits
+    }
+
+
 def analyze_ai_generated_content(text: str) -> dict:
     """
-    Analyze text for AI-generated content probability
-    Uses heuristic analysis (can be enhanced with ML models)
+    Analyze text for AI-generated content probability.
+    Focused on text patterns, NOT medical relevance (that's score_document_relevance).
     """
     ai_indicators = []
     ai_score = 0
 
-    if not text:
-        return {"score": 50, "indicators": ["No text content to analyze"]}
+    if not text or len(text.strip()) < 20:
+        return {"score": 70, "indicators": ["No text to analyze"], "medical_keyword_count": 0}
 
-    # Check for generic/vague language patterns
-    generic_phrases = ["in conclusion", "it is important", "this document serves",
-                       "hereby confirm", "to whom it may concern"]
-    generic_count = sum(1 for phrase in generic_phrases if phrase in text)
-    if generic_count >= 2:
+    text_lower = text.lower()
+
+    # Generic / template language
+    generic_phrases = [
+        "in conclusion", "it is important to note", "this document serves",
+        "hereby confirm", "to whom it may concern", "as discussed above",
+        "the purpose of this", "it should be noted", "furthermore",
+        "in summary", "as mentioned earlier"
+    ]
+    generic_count = sum(1 for phrase in generic_phrases if phrase in text_lower)
+    if generic_count >= 3:
+        ai_score += 30
+        ai_indicators.append(f"Heavy template language detected ({generic_count} generic phrases)")
+    elif generic_count >= 2:
         ai_score += 20
-        ai_indicators.append("Generic template-like language detected")
+        ai_indicators.append("Template-like language detected")
 
-    # Check for repetitive patterns
-    words = text.split()
-    if len(words) > 100:
+    # Word repetition analysis
+    words = text_lower.split()
+    if len(words) > 50:
         word_freq = {}
         for word in words:
-            word_freq[word] = word_freq.get(word, 0) + 1
+            if len(word) > 3:  # Skip short words
+                word_freq[word] = word_freq.get(word, 0) + 1
+        if word_freq:
+            avg_freq = sum(word_freq.values()) / len(word_freq)
+            if avg_freq > 5:
+                ai_score += 15
+                ai_indicators.append("High word repetition pattern")
 
-        # High repetition might indicate AI generation
-        avg_freq = sum(word_freq.values()) / len(word_freq)
-        if avg_freq > 5:
-            ai_score += 15
-            ai_indicators.append("High word repetition pattern detected")
+    # Sentence uniformity (AI text tends to have very uniform sentence lengths)
+    sentences = [s.strip() for s in re.split(r'[.!?]', text) if len(s.strip()) > 10]
+    if len(sentences) >= 5:
+        lengths = [len(s.split()) for s in sentences]
+        avg_len = sum(lengths) / len(lengths)
+        variance = sum((l - avg_len) ** 2 for l in lengths) / len(lengths)
+        if variance < 4 and avg_len > 10:
+            ai_score += 20
+            ai_indicators.append("Suspiciously uniform sentence lengths — possible AI generation")
 
-    # Check for medical keyword coverage
-    medical_coverage = sum(1 for kw in MEDICAL_KEYWORDS if kw in text)
-    if medical_coverage < 3:
-        ai_score += 25
-        ai_indicators.append("Low medical terminology coverage")
-
-    # Check text length
+    # Short document content
     if len(text) < 100:
         ai_score += 20
-        ai_indicators.append("Suspiciously short document content")
+        ai_indicators.append("Very short document")
+
+    medical_coverage = sum(1 for kw in MEDICAL_KEYWORDS if kw in text_lower)
 
     return {
         "score": min(100, ai_score),
@@ -333,64 +514,99 @@ def compute_risk_score(files: list, hospital_verified: bool = False) -> dict:
         results["ai_analysis"].append(ai_result)
     results["processing_times"]["ai_analysis_stage"] = round(time.time() - ai_start, 2)
 
-    # Calculate weighted risk scores
+    # ── Stage 4: Document Relevance Scoring (NEW — dominant factor) ──
+    relevance_start = time.time()
+    relevance_results = []
+    for file_path, text in files_data:
+        rel = score_document_relevance(text)
+        relevance_results.append(rel)
+    results["relevance_analysis"] = relevance_results
+    results["processing_times"]["relevance_stage"] = round(time.time() - relevance_start, 2)
+
+    # ── Calculate weighted risk scores ──────────────────────────────
     avg_tampering = sum(r["score"] for r in results["tampering_analysis"]) / max(1, len(results["tampering_analysis"]))
     avg_ai = sum(r["score"] for r in results["ai_analysis"]) / max(1, len(results["ai_analysis"]))
     metadata_mismatch = metadata_result["score"]
+    avg_relevance = sum(r["score"] for r in relevance_results) / max(1, len(relevance_results))
 
-    # SRS v2.0 Formula
-    final_risk_score = int(
+    # Aggregate medical keyword stats
+    all_text = " ".join(text for _, text in files_data)
+    total_medical_keywords = sum(1 for kw in MEDICAL_KEYWORDS if kw in all_text.lower())
+    total_red_flags = sum(r.get("red_flags_found", 0) for r in relevance_results)
+
+    # SRS v2.0 Enhanced Formula (relevance is the dominant component)
+    calculated_score = (
         WEIGHTS["tampering"] * avg_tampering +
         WEIGHTS["ai_probability"] * avg_ai +
-        WEIGHTS["metadata_mismatch"] * metadata_mismatch
+        WEIGHTS["metadata_mismatch"] * metadata_mismatch +
+        WEIGHTS["relevance"] * avg_relevance
     )
 
-    if hospital_verified:
-        final_risk_score = max(0, int(final_risk_score * 0.8))
-        results["details"].append("Risk score reduced (-20%) due to verified hospital status.")
+    # HARD FLOOR: if NO medical keywords at all → minimum 75
+    if total_medical_keywords == 0:
+        calculated_score = max(75, calculated_score)
+        results["details"].append("⚠️ FRAUD ALERT: No medical terminology found in any document")
+    elif total_medical_keywords < MIN_MEDICAL_KEYWORDS_REQUIRED:
+        calculated_score = max(55, calculated_score)
+        results["details"].append(f"⚠️ WARNING: Only {total_medical_keywords} medical terms (need ≥{MIN_MEDICAL_KEYWORDS_REQUIRED})")
+
+    # HARD FLOOR: if many non-medical red flags → minimum 60
+    if total_red_flags >= 5:
+        calculated_score = max(70, calculated_score)
+        results["details"].append(f"⚠️ FRAUD ALERT: {total_red_flags} non-medical red flags detected")
+    elif total_red_flags >= 3:
+        calculated_score = max(55, calculated_score)
+        results["details"].append(f"⚠️ WARNING: {total_red_flags} non-medical terms found")
+
+    final_risk_score = int(min(100, calculated_score))
+
+    if hospital_verified and final_risk_score < 70:
+        final_risk_score = max(0, int(final_risk_score * 0.85))
+        results["details"].append("Risk score reduced (-15%) due to verified hospital status")
 
     results["risk_scores"] = {
         "tampering_score": round(avg_tampering, 2),
         "ai_probability_score": round(avg_ai, 2),
-        "metadata_mismatch_score": metadata_mismatch,
-        "final_risk_score": min(100, final_risk_score)
+        "metadata_mismatch_score": round(metadata_mismatch, 2),
+        "relevance_score": round(avg_relevance, 2),
+        "final_risk_score": final_risk_score,
+        "medical_keywords_found": total_medical_keywords,
+        "red_flags_found": total_red_flags
     }
 
-    # Determine verdict and recommendation per SRS v2.0
-    risk_score = min(100, final_risk_score)
+    # Determine verdict
+    risk_score = final_risk_score
 
     if risk_score < 40:
         results["verdict"] = "Low Risk"
         results["recommendation"] = "approve"
-        results["details"].append("Campaign auto-approved for publication")
+        results["details"].append("Documents appear to be legitimate medical records")
     elif risk_score < 70:
-        results["verdict"] = "Medium Risk"
+        results["verdict"] = "Medium Risk — Admin Review Required"
         results["recommendation"] = "escalate"
-        results["details"].append("Advisory note visible to donors recommended")
+        results["details"].append("Documents require careful manual verification")
     else:
-        results["verdict"] = "High Risk - Manual Review Required"
-        results["recommendation"] = "escalate"
-        results["details"].append("Admin review required before publication")
+        results["verdict"] = "High Risk — Likely Fraudulent"
+        results["recommendation"] = "reject"
+        results["details"].append("Documents do not appear to be genuine medical records")
 
-    # Add file hashes for on-chain storage
+    # File hashes for on-chain storage
     for file_path, text in files_data:
         try:
             with open(file_path, "rb") as f:
                 file_hash = hashlib.sha256(f.read()).hexdigest()
-            results["details"].append(f"File: {os.path.basename(file_path)} - SHA256: {file_hash}")
+            results["details"].append(f"File: {os.path.basename(file_path)} — SHA256: {file_hash}")
         except:
             pass
 
     results["processing_times"]["total"] = round(time.time() - start_time, 2)
     results["total_file_size"] = total_file_size
 
-    # Add keyword coverage details
-    all_text = " ".join(text for _, text in files_data)
-    medical_keywords_found = sum(1 for kw in MEDICAL_KEYWORDS if kw in all_text)
     results["medical_keyword_coverage"] = {
-        "found": medical_keywords_found,
+        "found": total_medical_keywords,
         "total": len(MEDICAL_KEYWORDS),
-        "percentage": round((medical_keywords_found / len(MEDICAL_KEYWORDS)) * 100, 2)
+        "minimum_required": MIN_MEDICAL_KEYWORDS_REQUIRED,
+        "passed": total_medical_keywords >= MIN_MEDICAL_KEYWORDS_REQUIRED
     }
 
     return results

@@ -13,7 +13,7 @@ describe('Campaign Routes', () => {
   let testCampaign;
 
   beforeAll(async () => {
-    await mongoose.connect('mongodb://127.0.0.1:27017/medtrust_test');
+    // Connection managed globally by server.js
   });
 
   const testEmails = [
@@ -76,7 +76,7 @@ describe('Campaign Routes', () => {
     it('Should create a campaign successfully for patient', async () => {
       const campaignData = {
         title: 'Test Medical Campaign',
-        description: 'Help fund medical treatment',
+        description: 'Help fund medical treatment. This description is now long enough to pass the fifty character minimum requirement for campaigns.',
         targetAmount: '10000',
         hospitalId: hospitalId,
         medicalDetails: JSON.stringify({ condition: 'Test condition' }),
@@ -108,7 +108,7 @@ describe('Campaign Routes', () => {
 
     it('Should reject campaign creation without required fields', async () => {
       const campaignData = {
-        description: 'Missing title',
+        description: 'Missing title but this description evaluates to at least fifty characters. This is for medical treatment and surgery.',
         targetAmount: '10000',
       };
 
@@ -124,7 +124,7 @@ describe('Campaign Routes', () => {
     it('Should reject campaign creation with invalid target amount', async () => {
       const campaignData = {
         title: 'Invalid Campaign',
-        description: 'Test',
+        description: 'This is a test description that is definitely over fifty characters long. It is for a medical treatment and surgery at the hospital.',
         targetAmount: '-100',
       };
 
@@ -140,7 +140,7 @@ describe('Campaign Routes', () => {
     it('Should reject campaign creation by non-patient user', async () => {
       const campaignData = {
         title: 'Hospital Campaign',
-        description: 'Test',
+        description: 'This is a test description that is definitely over fifty characters long for medical treatment and surgery.',
         targetAmount: '10000',
       };
 

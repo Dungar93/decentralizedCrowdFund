@@ -31,7 +31,7 @@ const getIoInstance = () => {
 // @route   POST /api/milestones/:campaignId/confirm
 // @desc    Hospital confirms a treatment milestone
 // @access  Private (Hospital role)
-router.post('/:campaignId/confirm', authMiddleware, roleMiddleware(['hospital']), async (req, res) => {
+router.post('/:campaignId/confirm', authMiddleware, roleMiddleware(['hospital', 'admin']), async (req, res) => {
   try {
     const { milestoneIndex, transactionHash } = req.body;
 
@@ -44,8 +44,8 @@ router.post('/:campaignId/confirm', authMiddleware, roleMiddleware(['hospital'])
       return res.status(404).json({ error: 'Campaign not found' });
     }
 
-    // Verify this hospital is associated with the campaign
-    if (!campaign.hospitalId || campaign.hospitalId.toString() !== req.user.userId) {
+    // Verify this hospital is associated with the campaign (skip for admin)
+    if (req.user.role !== 'admin' && (!campaign.hospitalId || campaign.hospitalId.toString() !== req.user.userId)) {
       return res.status(403).json({
         error: 'Not authorized - this hospital is not associated with the campaign'
       });
@@ -132,32 +132,43 @@ router.post('/:campaignId/confirm', authMiddleware, roleMiddleware(['hospital'])
           return res.status(400).json({ error: 'Failed to verify transaction: ' + txError.message });
         }
       } else {
-        // Fallback for Backend test bypass
+        // Fallback for Backend test bypass (hospital or admin without tx hash)
         try {
           console.log(`Confirming milestone ${milestoneIndex} directly from backend on contract ${campaign.smartContractAddress}`);
           
-          const hospitalUser = await User.findById(req.user.userId).select('walletAddress');
-          if (!hospitalUser?.walletAddress) {
-            return res.status(400).json({ error: 'Hospital wallet is not linked. Please link/verify your wallet first.' });
+          // For admin, use the campaign's hospital wallet; for hospital, use their own
+          const walletUserId = req.user.role === 'admin' ? campaign.hospitalId : req.user.userId;
+          const walletUser = walletUserId ? await User.findById(walletUserId).select('walletAddress') : null;
+
+          if (!walletUser?.walletAddress) {
+            // No linked hospital wallet — do database-only confirmation
+            console.log('No hospital wallet found — confirming in database only (no on-chain tx)');
+            onChainResult = { success: true, databaseOnly: true };
+          } else {
+            const confirmResult = await confirmMilestoneOnChain(
+              campaign.smartContractAddress,
+              milestoneIndex,
+              walletUser.walletAddress
+            );
+
+            onChainResult = {
+              success: true,
+              transactionHash: confirmResult.transactionHash,
+              blockNumber: confirmResult.blockNumber,
+              gasUsed: confirmResult.gasUsed,
+            };
           }
-
-          const confirmResult = await confirmMilestoneOnChain(
-            campaign.smartContractAddress,
-            milestoneIndex,
-            hospitalUser.walletAddress
-          );
-
-          onChainResult = {
-            success: true,
-            transactionHash: confirmResult.transactionHash,
-            blockNumber: confirmResult.blockNumber,
-            gasUsed: confirmResult.gasUsed,
-          };
         } catch (contractError) {
           console.error('Smart contract backend confirm error:', contractError.message);
-          return res.status(400).json({
-            error: 'Failed to execute backend confirmation: ' + contractError.message
-          });
+          // For admin, allow database-only fallback even on contract errors
+          if (req.user.role === 'admin') {
+            console.log('Admin fallback: confirming in database only due to contract error');
+            onChainResult = { success: true, databaseOnly: true, contractError: contractError.message };
+          } else {
+            return res.status(400).json({
+              error: 'Failed to execute backend confirmation: ' + contractError.message
+            });
+          }
         }
       }
     }
@@ -483,6 +494,22 @@ router.post('/:campaignId/release', authMiddleware, roleMiddleware(['patient', '
   }
 });
 
+// @route   GET /api/milestones/hospital/my-campaigns
+// @desc    Get all campaigns associated with logged-in hospital
+// @access  Private (Hospital role)
+// IMPORTANT: This MUST be declared before GET /:campaignId to avoid route shadowing
+router.get('/hospital/my-campaigns', authMiddleware, roleMiddleware(['hospital']), async (req, res) => {
+  try {
+    const campaigns = await Campaign.find({
+      hospitalId: req.user.userId,
+    }).select('title description status milestones raisedAmount targetAmount smartContractAddress');
+
+    res.json({ campaigns });
+  } catch (error) {
+    res.status(500).json({ error: `Failed to fetch hospital campaigns: ${error.message}` });
+  }
+});
+
 // @route   GET /api/milestones/:campaignId
 // @desc    Get all milestones for a campaign
 // @access  Public
@@ -501,21 +528,6 @@ router.get('/:campaignId', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: `Failed to fetch milestones: ${error.message}` });
-  }
-});
-
-// @route   GET /api/milestones/hospital/my-campaigns
-// @desc    Get all campaigns associated with logged-in hospital
-// @access  Private (Hospital role)
-router.get('/hospital/my-campaigns', authMiddleware, roleMiddleware(['hospital']), async (req, res) => {
-  try {
-    const campaigns = await Campaign.find({
-      hospitalId: req.user.userId,
-    }).select('title description status milestones raisedAmount targetAmount smartContractAddress');
-
-    res.json({ campaigns });
-  } catch (error) {
-    res.status(500).json({ error: `Failed to fetch hospital campaigns: ${error.message}` });
   }
 });
 

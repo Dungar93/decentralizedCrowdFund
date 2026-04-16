@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   FiShield, FiAlertTriangle, FiCheckCircle, FiXCircle,
   FiFileText, FiUser, FiDollarSign, FiEye, FiChevronRight,
-  FiRefreshCw, FiWifi
+  FiRefreshCw, FiWifi, FiActivity
 } from 'react-icons/fi';
 import api from '../services/api';
 
@@ -40,9 +40,11 @@ interface RiskData {
   finalRiskScore?: number;
   riskCategory?: string;
   recommendation?: string;
+  // SRS v2.0 scoring breakdown
   tamperingScore?: number;
   aiGeneratedScore?: number;
   metadataMismatchScore?: number;
+  // Legacy detailed breakdown
   aiVerificationDetails?: AiVerificationDetails;
 }
 
@@ -59,6 +61,13 @@ interface Campaign {
   riskAssessment?: RiskData;
   riskAssessmentId?: RiskData;
   createdAt: string;
+  milestones?: Array<{
+    description: string;
+    targetAmount: number;
+    status: string;
+    confirmedAt?: string;
+    releasedAt?: string;
+  }>;
 }
 
 interface DonationRecord {
@@ -250,6 +259,46 @@ export default function AdminCampaignReview() {
   };
 
   const renderRiskBreakdown = (ra: RiskData) => {
+    // First check for SRS v2.0 scoring breakdown (direct fields)
+    if (
+      ra.tamperingScore != null ||
+      ra.aiGeneratedScore != null ||
+      ra.metadataMismatchScore != null
+    ) {
+      // Normalize scores that might be stored as 0-100 or 0-1
+      const normalize = (v: number | undefined) => {
+        if (v == null) return 0;
+        return v <= 1 ? v * 100 : v;
+      };
+      const tampering = normalize(ra.tamperingScore);
+      const aiGen = normalize(ra.aiGeneratedScore);
+      const metadata = normalize(ra.metadataMismatchScore);
+
+      return (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-slate-400">Tampering score</span>
+            <span className={`font-bold ${getRiskColor(tampering)}`}>
+              {tampering.toFixed(0)}%
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-slate-400">AI-generated score</span>
+            <span className={`font-bold ${getRiskColor(aiGen)}`}>
+              {aiGen.toFixed(0)}%
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-slate-400">Metadata mismatch</span>
+            <span className={`font-bold ${getRiskColor(metadata)}`}>
+              {metadata.toFixed(0)}%
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    // Fallback to legacy aiVerificationDetails
     const d = ra.aiVerificationDetails;
     if (d && (d.ocrConfidence != null || d.metadataConsistency != null)) {
       const rows: { label: string; value: number }[] = [];
@@ -269,38 +318,11 @@ export default function AdminCampaignReview() {
       );
     }
 
-    if (
-      ra.tamperingScore != null ||
-      ra.aiGeneratedScore != null ||
-      ra.metadataMismatchScore != null
-    ) {
-      const scale = (v: number) => (v <= 1 ? v * 100 : v);
-      return (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-slate-400">Tampering score</span>
-            <span className={`font-bold ${getRiskColor(scale(ra.tamperingScore || 0))}`}>
-              {scale(ra.tamperingScore || 0).toFixed(0)}%
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-slate-400">AI-generated score</span>
-            <span className={`font-bold ${getRiskColor(scale(ra.aiGeneratedScore || 0))}`}>
-              {scale(ra.aiGeneratedScore || 0).toFixed(0)}%
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-slate-400">Metadata mismatch</span>
-            <span className={`font-bold ${getRiskColor(scale(ra.metadataMismatchScore || 0))}`}>
-              {scale(ra.metadataMismatchScore || 0).toFixed(0)}%
-            </span>
-          </div>
-        </div>
-      );
-    }
-
     return (
-      <p className="text-sm text-slate-500">No detailed breakdown available for this assessment.</p>
+      <div className="space-y-2">
+        <p className="text-sm text-slate-500">No detailed breakdown available.</p>
+        <p className="text-xs text-slate-600">Final risk score: {primaryRiskScore(ra)}</p>
+      </div>
     );
   };
 
@@ -688,6 +710,41 @@ export default function AdminCampaignReview() {
                               <FiEye className="w-4 h-4 shrink-0" />
                               {docLabel(doc, idx)}
                             </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Milestones */}
+                    {selectedCampaign.milestones && selectedCampaign.milestones.length > 0 && (
+                      <div>
+                        <h4 className="font-bold text-white mb-2 text-sm flex items-center gap-2">
+                          <FiActivity className="w-4 h-4 text-purple-400" />
+                          Treatment Milestones ({selectedCampaign.milestones.length})
+                        </h4>
+                        <p className="text-xs text-slate-500 mb-3">
+                          Funds are locked in escrow and released per milestone after hospital confirmation.
+                        </p>
+                        <div className="space-y-2">
+                          {selectedCampaign.milestones.map((milestone, idx) => (
+                            <div
+                              key={idx}
+                              className="p-3 bg-slate-900/50 border border-white/5 rounded-xl flex items-center justify-between gap-3"
+                            >
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm text-white font-medium truncate">
+                                  {milestone.description}
+                                </p>
+                                <p className="text-xs text-slate-500">
+                                  Status: <span className="text-slate-300 capitalize">{milestone.status}</span>
+                                </p>
+                              </div>
+                              <div className="text-right flex-shrink-0">
+                                <p className="text-sm font-bold text-purple-400">
+                                  {milestone.targetAmount} ETH
+                                </p>
+                              </div>
+                            </div>
                           ))}
                         </div>
                       </div>

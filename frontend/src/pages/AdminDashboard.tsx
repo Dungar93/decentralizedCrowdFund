@@ -240,7 +240,7 @@ export default function AdminDashboard() {
             </motion.div>
 
             <motion.div 
-              onClick={() => navigate("/admin/contracts")}
+              onClick={() => document.getElementById('active-campaigns')?.scrollIntoView({ behavior: 'smooth' })}
               variants={itemVariants} 
               className="glass-card rounded-2xl p-5 flex flex-col items-center justify-center relative group cursor-pointer hover:-translate-y-1 transition-all duration-300"
             >
@@ -340,10 +340,10 @@ export default function AdminDashboard() {
 
                       <div className="flex flex-wrap items-center justify-end gap-3 mt-6 pt-4 border-t border-white/5 relative z-10 w-full">
                         <button
-                          onClick={() => navigate(`/campaign/${campaign._id}`)}
+                          onClick={() => navigate(`/admin/campaign-review`)}
                           className="px-4 py-2 bg-white/5 hover:bg-white/10 text-white font-medium rounded-lg transition-all border border-white/10 flex items-center gap-2 text-sm mr-auto"
                         >
-                          <FiEye className="w-4 h-4" /> View Details
+                          <FiEye className="w-4 h-4" /> Review Submission
                         </button>
 
                         <button
@@ -461,6 +461,19 @@ export default function AdminDashboard() {
 
           <div
             className="glass-card rounded-2xl p-6 cursor-pointer group hover:-translate-y-1 transition-all duration-300 border border-fuchsia-500/20"
+            onClick={() => navigate("/admin/campaign-review")}
+          >
+            <div className="flex items-center gap-4 mb-3">
+              <div className="p-3 bg-amber-500/20 text-amber-300 rounded-lg group-hover:scale-110 transition-transform"><FiClock className="w-6 h-6"/></div>
+              <h3 className="font-bold text-lg text-white">Campaign review</h3>
+            </div>
+            <p className="text-sm text-slate-400">
+              Review AI Risk scores and medical bills for new campaigns
+            </p>
+          </div>
+
+          <div
+            className="glass-card rounded-2xl p-6 cursor-pointer group hover:-translate-y-1 transition-all duration-300"
             onClick={() => navigate("/admin/kyc-review")}
           >
             <div className="flex items-center gap-4 mb-3">

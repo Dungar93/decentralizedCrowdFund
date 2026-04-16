@@ -25,7 +25,7 @@ describe('Donation Routes', () => {
   let testDonation;
 
   beforeAll(async () => {
-    await mongoose.connect('mongodb://127.0.0.1:27017/medtrust_test');
+    // Relying on server.js to establish the MongoDB connection globally
   });
 
   afterAll(async () => {

@@ -189,36 +189,7 @@ export default function CampaignDetail() {
     }
   };
 
-  const handleDonateDirect = async () => {
-    if (!donationAmount || parseFloat(donationAmount) <= 0) {
-      setActionError("Please enter a valid donation amount");
-      return;
-    }
 
-    if (!campaign?.smartContractAddress) {
-      setActionError("Smart contract not deployed yet. Please wait for admin deployment.");
-      return;
-    }
-
-    try {
-      setDonating(true);
-      setActionError("");
-
-      const response = await api.post(`/api/donations/${id}/donate-direct`, {
-        amount: donationAmount
-      });
-
-      alert(`Backend test donation successful!\nTransaction: ${response.data.transactionHash.slice(0, 20)}...`);
-      setDonationAmount("");
-      fetchCampaign();
-      fetchDonations();
-    } catch (err: any) {
-      console.error("Direct donation error:", err);
-      setActionError(err.response?.data?.error || "Failed to process backend donation");
-    } finally {
-      setDonating(false);
-    }
-  };
 
   const handleConfirmMilestone = async (milestoneIndex: number) => {
     if (!walletConnected) {
@@ -441,7 +412,7 @@ export default function CampaignDetail() {
                   <div>
                     <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Treatment Facility</p>
                     <p className="text-white font-medium flex items-center gap-2">
-                      {campaign.hospitalId?.hospitalName || campaign.hospitalId?.name || "Not assigned"}
+                      {campaign.hospitalId?.hospitalName || "Not assigned"}
                       {campaign.hospitalId?.verified && (
                         <FiCheckCircle className="text-emerald-400 w-4 h-4" />
                       )}
@@ -501,7 +472,7 @@ export default function CampaignDetail() {
                           <span className="text-lg font-bold text-white block">
                             {m.targetAmount.toFixed(2)} ETH
                           </span>
-                          {!isCompleted && campaign.status === "active" && user?.role === "hospital" && (
+                          {!isCompleted && campaign.status === "active" && (user?.role === "hospital" || user?.role === "admin") && (
                             <div className="flex flex-col gap-1 items-end mt-2">
                               <button
                                  onClick={() => handleConfirmMilestone(idx)}
@@ -509,24 +480,6 @@ export default function CampaignDetail() {
                                  className="text-[10px] sm:text-xs bg-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded-md hover:bg-emerald-500/40 disabled:opacity-50 transition-colors w-full sm:w-auto text-center"
                               >
                                  {donating ? "Processing..." : "Confirm (Hospital)"}
-                              </button>
-                              <button
-                                 onClick={async () => {
-                                   try {
-                                     setDonating(true);
-                                     await api.post(`/api/milestones/${id}/confirm`, { milestoneIndex: idx });
-                                     alert("Backend test milestone confirmed!");
-                                     fetchCampaign();
-                                   } catch (err: any) {
-                                     alert(err.response?.data?.error || "Error bypassing to backend");
-                                   } finally {
-                                     setDonating(false);
-                                   }
-                                 }}
-                                 disabled={donating}
-                                 className="text-[10px] bg-slate-800 text-slate-300 px-3 py-1.5 rounded-md hover:bg-slate-700 disabled:opacity-50 transition-colors w-full sm:w-auto text-center"
-                              >
-                                 Test Bypass (Backend)
                               </button>
                             </div>
                           )}
@@ -753,19 +706,6 @@ export default function CampaignDetail() {
                       </p>
                     </div>
                   )}
-
-                  {/* Backend testing bypass button */}
-                  <div className="pt-4 border-t border-white/5 mt-4">
-                    <button
-                      type="button"
-                      onClick={handleDonateDirect}
-                      disabled={donating}
-                      className="w-full px-4 py-3 bg-slate-800 border border-slate-600 text-slate-300 font-medium rounded-xl hover:bg-slate-700 transition-all text-sm flex items-center justify-center gap-2"
-                    >
-                      <FiDollarSign className="w-4 h-4 text-emerald-400" />
-                      Test Donate (Backend Bypass)
-                    </button>
-                  </div>
                 </form>
               ) : (
                 <div className="text-center py-6 px-4 bg-slate-900/50 rounded-2xl border border-white/5 border-dashed">

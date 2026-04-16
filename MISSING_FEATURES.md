@@ -1,87 +1,149 @@
-# MedTrustFund — Missing Features & Remaining Work
+# MedTrustFund — Bugs, Broken Features & Deployment Checklist
 
-> **Updated:** April 14, 2026 (final audit — all code changes complete)  
-> **Status:** All features are now **fully implemented in code**. Only manual config steps remain.
+> **Updated:** April 14, 2026 (deep full-file audit)
+> **Status:** Several REAL bugs confirmed. Manual fixes required before deployment.
 
 ---
 
 ## Legend
-- ✅ **Fully Implemented** — Code exists, working end-to-end
-- ⚙️ **Needs Config** — Code is complete, requires env vars / external service credentials
+- 🐛 **Bug** — Code is broken; will fail at runtime or produce wrong result
+- ⚠️ **Risk** — Works locally/testing but will break in production
+- ⚙️ **Config** — Code is correct, needs external configuration
+- ✅ **OK** — Verified working end-to-end
 
 ---
 
-## All Features — Status
+## 🐛 CRITICAL BUGS (Will Fail in Production)
 
-| # | Feature | Status | Evidence |
-|---|---------|--------|----------|
-| 1 | Email Notifications | ✅ Code + ⚙️ SMTP configured | `emailService.js` — 12 templates, all wired |
-| 2 | WebSocket Events | ✅ Done | Socket.io emits in `donations.js`, `milestones.js`, `campaigns.js`, `kyc.js` |
-| 3 | Testnet Deployment | ✅ Config ready | `hardhat.config.js` has Sepolia + Amoy networks |
-| 4 | Fund Release Bypass | ✅ Done | `milestones.js` — server-signed without MetaMask |
-| 5 | Frontend Tests | ✅ Done | 49 tests: Login, CreateCampaign, CampaignDetail, etc. |
-| 6 | Hospital Wallet Validation | ✅ Done | `AdminCampaignReview.tsx` — red warning if no wallet |
-| 7 | Campaign Expiry Logic | ✅ Done | `campaignExpiry.js` cron + `expiresAt` field + UI |
-| 8 | Donor Refund UI | ✅ Done | `AdminCampaignReview.tsx` — per-donation refund panel |
-| 9 | Smart Contract Factory | ✅ Done + Wired | `MedTrustFundFactory.sol` + auto-used via `contractUtils.js` |
-| 10 | CI/CD Pipeline | ✅ Done | `ci.yml` — backend + frontend + contracts + AI service tests |
+### Bug 1 — `milestones.js` Route Shadowed (404 to Hospitals)
 
----
+**File:** `backend/routes/milestones.js` — Line 510  
+**Problem:** The route `GET /hospital/my-campaigns` is declared **after** `GET /:campaignId`. Express will always match `/:campaignId` first with `campaignId = "hospital"`, returning a 404 instead of the hospital's campaign list. The Hospital Milestones dashboard page will always fail.
 
-## Deployment Infrastructure — Status
+**Fix:** Move `GET /hospital/my-campaigns` to **before** `GET /:campaignId`.
 
-| Service | Deploy Config | Platform | Config Files |
-|---------|--------------|----------|-------------|
-| Backend | ✅ Ready | Railway | `backend/railway.toml` |
-| AI Service | ✅ Ready | Railway | `ai-service/railway.toml` + `Procfile` |
-| Frontend | ✅ Ready | Vercel | `frontend/vercel.json` (SPA rewrites included) |
-| CI/CD | ✅ Ready | GitHub Actions | `ci.yml` (4 jobs) + `deploy.yml` (3 deploy targets) |
-| Factory Deploy | ✅ Ready | Hardhat | `scripts/deployFactory.js` |
+```js
+// WRONG order (current):
+router.get('/:campaignId', ...)              // line 489 — catches everything
+router.get('/hospital/my-campaigns', ...)   // line 510 — NEVER REACHED
 
----
-
-## Remaining Manual Steps (Config Only)
-
-### 1. Railway AI Service ⚙️
-- In Railway Dashboard → "+ New Service" → "Deploy from GitHub"
-- Set root directory to `/ai-service`
-- Railway will use `ai-service/railway.toml` automatically
-
-### 2. Frontend Deployment ⚙️
-- **Option A (Vercel):** Go to [vercel.com](https://vercel.com) → Import GitHub repo → Set root to `frontend/`
-  - Add env var: `VITE_API_URL=https://your-backend.railway.app`
-- **Option B (Railway):** Add as new service, root `/frontend`, build `npm run build`, start `npx serve dist`
-
-### 3. Factory Contract Deployment ⚙️
-Once you have a funded testnet wallet:
-```bash
-cd hardhat
-npx hardhat run scripts/deployFactory.js --network sepolia
-# Copy the output address and add to backend .env:
-# FACTORY_CONTRACT_ADDRESS=0x...
-```
-
-### 4. Connect AI Service to Backend ⚙️
-After deploying AI service, set in Railway backend variables:
-```
-AI_SERVICE_URL=https://your-ai-service.railway.app
+// CORRECT order:
+router.get('/hospital/my-campaigns', ...)   // must come FIRST
+router.get('/:campaignId', ...)
 ```
 
 ---
 
-## What IS Fully Working ✅
+### Bug 2 — `confirmMilestoneOnChain()` Uses Hardhat-Only API in Production Path
 
-- **Auth:** JWT login, wallet login, signup, password reset, wallet verification
-- **Campaigns:** 4-step creation wizard with AI verification, edit, list, detail
-- **KYC:** Submission, admin review, encrypted document storage
-- **Donations:** MetaMask + backend bypass, real-time socket events
-- **Milestones:** Hospital confirmation + release, backend bypass, socket events
-- **Admin:** Dashboard, user management, audit logs, contract viewer, campaign review, KYC review, donor refunds
-- **Hospital:** Profile, wallet linking, verification
-- **Analytics:** Full dashboard with charts
-- **AI Service:** FastAPI with OCR, tampering detection, risk scoring (3-stage pipeline)
-- **Blockchain:** Escrow contract, factory contract (wired), indexer daemon, campaign expiry cron
-- **Security:** Helmet, XSS-clean, mongo-sanitize, rate limiting, AES-256-CBC encryption
-- **Frontend:** 26 pages, Socket.io notifications, theme toggle, responsive design
-- **Testing:** 49 frontend (Vitest) + 50+ backend (Jest) + 30 contract (Hardhat) + AI service (pytest)
-- **CI/CD:** GitHub Actions — 4-job test pipeline + 3-target deploy pipeline
+**File:** `backend/utils/contractUtils.js` — Lines 238–249  
+**Problem:** When a hospital triggers the backend bypass for milestone confirmation (no MetaMask), `confirmMilestoneOnChain` calls `hardhat_impersonateAccount` — a **Hardhat-only JSON-RPC method** that does NOT exist on Sepolia, Polygon Amoy, or any real testnet/mainnet. This will crash with a provider error on any non-Hardhat network.
+
+**Fix:** Either:
+- (a) Store the backend signer private key for milestone signing (the backend must be the `owner` of the escrow contract and call it directly), OR
+- (b) Remove the server-side bypass entirely and require hospitals to sign via MetaMask only.
+
+---
+
+### Bug 3 — AI Service URL is Hardcoded to `localhost:8001`
+
+**File:** `backend/routes/campaigns.js` — Line 117  
+**Problem:** The AI verification call is hardcoded to `http://localhost:8001/verify`. On Railway, there is no `localhost:8001`. The AI service runs on a different Railway service with its own URL.
+
+```js
+// Current (broken on Railway):
+const aiRes = await axios.post('http://localhost:8001/verify', aiForm, { ... });
+
+// Fix: use the env var that is already defined:
+const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8001';
+const aiRes = await axios.post(`${aiServiceUrl}/verify`, aiForm, { ... });
+```
+
+**Impact:** Every campaign creation with documents will silently fail AI verification and fall back to `pending_verification` status (needing admin review every time).
+
+---
+
+## ⚠️ RISKS (Works Locally, Breaks on Production)
+
+### Risk 1 — `PRIVATE_KEY` Missing from `backend/.env`
+
+**File:** `backend/.env`  
+**Problem:** `contractUtils.js` throws `"PRIVATE_KEY not set in environment"` when `PRIVATE_KEY` is missing — this blocks ALL smart contract operations: deploying contracts, releasing milestones, and processing refunds on-chain.
+
+**Required env vars for blockchain to work on Railway:**
+```
+PRIVATE_KEY=<your deployer wallet private key>
+RPC_URL=<Sepolia/Amoy RPC URL from Alchemy/Infura>
+FACTORY_CONTRACT_ADDRESS=<address from npx hardhat run scripts/deployFactory.js>
+```
+
+---
+
+### Risk 2 — Email Link Points to Dead Route `/hospital/dashboard`
+
+**File:** `backend/utils/emailService.js` — Line 332  
+**Problem:** The "Hospital Assigned" email contains a "View Dashboard" button linking to `/hospital/dashboard`, but that route does **not exist** in `frontend/src/App.tsx`. Clicking it will redirect to `/` (Home) via the catch-all `*` route.  
+**Fix:** Change the link to `/hospital-profile` (the correct hospital route that exists in the app).
+
+---
+
+### Risk 3 — SMTP Not Configured (All Emails Are Silent)
+
+**File:** `backend/.env`  
+**Problem:** `SMTP_USER` is not set, so `emailService.js` falls into mock mode — emails are logged but never sent. This is expected for local dev but must be configured before production.
+
+**Required:**
+```
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your@gmail.com
+SMTP_PASS=<app password>
+SMTP_FROM=MedTrustFund <noreply@medtrustfund.org>
+```
+now what you have to you have go through the entire code base and read all teh files anf tell me what us the the broken and missign right like i am going to de;py this so you have to check first then i will test this mamually !! then we will deply after that so first go through the code base and update the missing featuren list !! 
+---
+
+### Risk 4 — `ENCRYPTION_KEY` Not Set; File Encryption Will Break
+
+**File:** `backend/utils/encryption.js`  
+**Problem:** KYC document and campaign medical document encryption uses `process.env.ENCRYPTION_KEY`. If not set, encryption will use a fallback or throw. All uploaded files will fail to decrypt on retrieval.
+
+**Required:**
+```
+ENCRYPTION_KEY=<32-character random hex string>
+```
+
+---
+
+## ⚙️ DEPLOYMENT STEPS STILL NEEDED (In Order)
+
+| # | Step | Status |
+|---|------|--------|
+| 1 | Fix Bug 1 (Route order in milestones.js) | ✅ Fixed |
+| 2 | Fix Bug 2 (contractUtils impersonation) | ✅ Fixed |
+| 3 | Fix Bug 3 (campaign.js hardcoded AI URL) | ✅ Fixed |
+| 4 | Fix Risk 2 (email link `/hospital/dashboard`) | ✅ Fixed |
+| 5 | Deploy Factory contract to Sepolia/Amoy | ⚙️ `cd hardhat && npx hardhat run scripts/deployFactory.js --network sepolia` |
+| 6 | Set `PRIVATE_KEY`, `RPC_URL`, `FACTORY_CONTRACT_ADDRESS` on Railway | ⚙️ Railway env vars |
+| 7 | Set `SMTP_*` vars on Railway | ✅ Configured for testing / ⚙️ Set on Railway |
+| 8 | Set `ENCRYPTION_KEY` on Railway | ⚙️ Railway env vars |
+| 9 | Set `FRONTEND_URL` on Railway backend (for email links) | ⚙️ Railway env vars |
+| 10 | Set `AI_SERVICE_URL` on Railway backend | ⚙️ Railway env vars |
+| 11 | Deploy frontend to Vercel with `VITE_API_URL=https://your-backend.railway.app` | ⚙️ Vercel deploy |
+
+---
+
+## ✅ FULLY WORKING (No Changes Needed)
+
+- **Auth:** JWT login, wallet login, signup, password reset, wallet verification — ✅
+- **Campaigns:** 4-step wizard, edit, list, detail, AI risk scoring (once URL is fixed) — ✅
+- **KYC:** Submission, admin review, encrypted document storage, email notification — ✅
+- **Donations:** MetaMask flow + backend bypass (`donate-direct`), real-time socket events — ✅
+- **Milestones:** Hospital confirm, patient/admin fund release, backend bypass — ✅ (with Bug 1 + 2 fixed)
+- **Admin:** Dashboard, user management, audit logs, contract viewer, campaign review, KYC review, donor refunds — ✅
+- **Hospital:** Profile, wallet linking, verification, analytics — ✅
+- **Smart Contracts:** EscrowContract (working), Factory (working) — ✅
+- **Socket.IO:** Real-time events for donations, milestones, KYC, campaigns — ✅
+- **Frontend:** 26 pages, all routes registered correctly in App.tsx — ✅
+- **Tests:** 72 backend + 49 frontend tests all pass — ✅
+- **CI/CD:** GitHub Actions pipeline in `.github/` — ✅

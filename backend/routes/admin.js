@@ -88,9 +88,10 @@ router.get('/campaigns/pending-review', async (req, res) => {
   try {
     const campaigns = await Campaign.find({ status: 'pending_verification' })
       .populate('patientId', 'name email walletAddress')
-      .populate('hospitalId', 'name hospitalName verified')
+      .populate('hospitalId', 'name hospitalName verified walletAddress')
       .populate({
         path: 'riskAssessmentId',
+        select: '-__v', // Exclude only __v, include all other fields
         populate: { path: 'manualReviewStatus.reviewedBy', select: 'name email' }
       })
       .sort({ createdAt: -1 });
@@ -111,6 +112,7 @@ router.get('/campaigns/:id/review-details', async (req, res) => {
       .populate('hospitalId')
       .populate({
         path: 'riskAssessmentId',
+        select: '-__v',
         populate: { path: 'manualReviewStatus.reviewedBy', select: 'name email' }
       });
 
@@ -466,27 +468,52 @@ router.get('/campaigns/:id/documents/:docIndex', async (req, res) => {
     }
 
     const doc = campaign.documents[docIndex];
-    const filePath = path.join(__dirname, '../../', doc.url);
+    // doc.url is like /uploads/filename - need to resolve to absolute path
+    const uploadsDir = path.join(__dirname, '../../uploads');
+    const fileName = path.basename(doc.url); // Extract just the filename
+    const filePath = path.join(uploadsDir, fileName);
+
+    console.log('Document path resolution:', { docUrl: doc.url, uploadsDir, fileName, filePath });
 
     if (!fs.existsSync(filePath)) {
+      console.error('Document file not found at:', filePath);
       return res.status(404).json({ error: 'Document file not found' });
     }
 
     // Decrypt and serve the file
     const decryptedBuffer = decryptFile(filePath);
-    const fileName = path.basename(doc.url);
-    const ext = path.extname(fileName).toLowerCase();
-    const contentType =
-      ext === '.pdf'
-        ? 'application/pdf'
-        : ext === '.png'
-          ? 'image/png'
-          : ext === '.webp'
-            ? 'image/webp'
-            : 'image/jpeg';
+
+    // Detect content type from magic bytes (multer saves without extensions)
+    let contentType = 'application/octet-stream';
+    if (decryptedBuffer.length >= 4) {
+      const header = decryptedBuffer.subarray(0, 5);
+      if (header[0] === 0x25 && header[1] === 0x50 && header[2] === 0x44 && header[3] === 0x46) {
+        // %PDF
+        contentType = 'application/pdf';
+      } else if (header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4E && header[3] === 0x47) {
+        // PNG
+        contentType = 'image/png';
+      } else if (header[0] === 0xFF && header[1] === 0xD8 && header[2] === 0xFF) {
+        // JPEG
+        contentType = 'image/jpeg';
+      } else if (header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46) {
+        // RIFF (WebP)
+        contentType = 'image/webp';
+      }
+    }
+
+    // Build a human-friendly download name from the document type
+    const docType = doc.type || doc.documentType || 'document';
+    const extMap = {
+      'application/pdf': '.pdf',
+      'image/png': '.png',
+      'image/jpeg': '.jpg',
+      'image/webp': '.webp',
+    };
+    const friendlyName = `${docType}${extMap[contentType] || ''}`;
 
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${friendlyName}"`);
     res.send(decryptedBuffer);
   } catch (error) {
     console.error('Document decryption error:', error);

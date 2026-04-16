@@ -17,4 +17,8 @@ beforeAll(async () => {
 // Global cleanup
 afterAll(async () => {
   console.log('Cleaning up test environment...');
+  const mongoose = require('mongoose');
+  if (mongoose.connection.readyState !== 0) {
+    await mongoose.connection.close();
+  }
 });
