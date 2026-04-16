@@ -13,9 +13,9 @@ const createTransporter = () => {
     }
   };
 
-  // For development/testing without SMTP
-  if (!process.env.SMTP_USER) {
-    logger.warn('SMTP not configured. Emails will be logged but not sent.');
+  // For development/testing without SMTP or if running test suites
+  if (!process.env.SMTP_USER || process.env.NODE_ENV === 'test') {
+    logger.warn('SMTP bypassed. Emails will be logged but not sent.');
     return {
       sendMail: async (mailOptions) => {
         logger.info('[Email Mock]', mailOptions);
