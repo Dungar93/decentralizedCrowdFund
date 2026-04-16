@@ -155,6 +155,12 @@ export default function Home() {
             <button onClick={() => navigate('/campaigns')} className="hidden md:block text-slate-400 hover:text-white font-semibold transition-colors text-sm">
               Campaigns
             </button>
+            <button onClick={() => navigate('/ai-verification')} className="hidden md:block text-slate-400 hover:text-white font-semibold transition-colors text-sm">
+              How AI Works
+            </button>
+            <button onClick={() => navigate('/eth-converter')} className="hidden md:block text-slate-400 hover:text-white font-semibold transition-colors text-sm">
+              ETH Converter
+            </button>
             <button onClick={() => navigate('/login')} className="hidden md:block text-slate-400 hover:text-white font-semibold transition-colors text-sm">
               Sign In
             </button>

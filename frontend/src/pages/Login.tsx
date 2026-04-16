@@ -70,6 +70,26 @@ export default function Login() {
       <div className="fixed top-6 right-6 z-50">
         <ThemeToggle />
       </div>
+
+      {/* ── Back to Home ── */}
+      <motion.div
+        initial={{ opacity: 0, x: -20 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ delay: 0.3 }}
+        className="fixed top-6 left-6 z-50"
+      >
+        <button
+          onClick={() => navigate('/')}
+          className="flex items-center gap-2.5 px-4 py-2 bg-white/5 border border-white/10 rounded-xl backdrop-blur-md hover:bg-white/10 transition-all group"
+        >
+          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-fuchsia-500 to-indigo-500 flex items-center justify-center font-black text-xs text-white shadow-[0_0_12px_rgba(192,38,211,0.4)]">
+            M
+          </div>
+          <span className="text-sm font-semibold text-slate-400 group-hover:text-white transition-colors hidden sm:inline">
+            MedTrustFund
+          </span>
+        </button>
+      </motion.div>
       {/* Dynamic Background Elements */}
       <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-purple-600/30 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-pink-600/20 rounded-full blur-[120px] pointer-events-none" />

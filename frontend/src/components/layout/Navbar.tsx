@@ -17,11 +17,13 @@ export default function Navbar() {
     setIsMenuOpen(false);
   };
 
-  const navLinks = isAuthenticated
-    ? (
-        [
+  const navLinks = [
+    { to: '/campaigns', label: 'Campaigns' },
+    { to: '/eth-converter', label: 'ETH Converter' },
+    { to: '/ai-verification', label: 'How AI Works' },
+    ...(isAuthenticated
+      ? [
           { to: '/dashboard', label: 'Dashboard' },
-          { to: '/campaigns', label: 'Campaigns' },
           user?.role === 'donor' && { to: '/my-donations', label: 'My donations' },
           user?.role === 'donor' && { to: '/transactions', label: 'Activity' },
           user?.role === 'patient' && { to: '/create-campaign', label: 'Create campaign' },
@@ -33,9 +35,9 @@ export default function Navbar() {
           user?.role === 'admin' && { to: '/admin/dashboard', label: 'Admin' },
           user?.role === 'admin' && { to: '/admin/kyc-review', label: 'KYC review' },
           user?.role === 'admin' && { to: '/admin/campaign-review', label: 'Review' },
-        ].filter(Boolean) as { to: string; label: string }[]
-      )
-    : [];
+        ]
+      : [])
+  ].filter(Boolean) as { to: string; label: string }[];
 
   return (
     <nav className="bg-slate-900/80 backdrop-blur-lg border-b border-white/10 sticky top-0 z-50">

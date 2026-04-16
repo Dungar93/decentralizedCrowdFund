@@ -147,12 +147,21 @@ export default function Campaigns() {
               className="w-full pl-10 pr-4 py-2 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/50 text-white placeholder-slate-500 transition-all text-sm"
             />
           </div>
-          <button
-            onClick={() => navigate("/dashboard")}
-            className="hidden sm:flex px-4 py-2 bg-white/5 text-slate-300 border border-white/10 rounded-xl hover:bg-white/10 hover:text-white transition-all font-medium text-sm"
-          >
-            Dashboard
-          </button>
+          {token ? (
+            <button
+              onClick={() => navigate("/dashboard")}
+              className="hidden sm:flex px-4 py-2 bg-white/5 text-slate-300 border border-white/10 rounded-xl hover:bg-white/10 hover:text-white transition-all font-medium text-sm"
+            >
+              Dashboard
+            </button>
+          ) : (
+            <button
+              onClick={() => navigate("/")}
+              className="hidden sm:flex px-4 py-2 bg-white/5 text-slate-300 border border-white/10 rounded-xl hover:bg-white/10 hover:text-white transition-all font-medium text-sm"
+            >
+              Home
+            </button>
+          )}
           <ThemeToggle />
         </motion.div>
       </header>
