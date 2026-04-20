@@ -16,7 +16,7 @@ const SmartContractSchema = new mongoose.Schema({
   
   network: {
     type: String,
-    enum: ['ethereum', 'polygon', 'sepolia', 'mumbai'],
+    enum: ['ethereum', 'polygon', 'sepolia', 'mumbai', 'hardhat', 'amoy', 'localhost'],
     required: true,
   },
   

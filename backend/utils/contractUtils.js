@@ -52,7 +52,12 @@ async function executeWithRetry(fn, operationName, maxRetries = MAX_RETRIES) {
       console.warn(`[${operationName}] Attempt ${attempt + 1}/${maxRetries + 1} failed: ${error.message}`);
 
       // Don't retry on certain errors
-      if (error.code === 'INSUFFICIENT_FUNDS' || error.code === 'UNPREDICTABLE_GAS_LIMIT') {
+      if (
+        error.code === 'INSUFFICIENT_FUNDS' ||
+        error.code === 'UNPREDICTABLE_GAS_LIMIT' ||
+        error.code === 'NO_CONTRACT_CODE' ||
+        error.code === 'BAD_DATA'
+      ) {
         throw error;
       }
     }
@@ -344,6 +349,18 @@ async function refundDonationOnChain(contractAddress, donorAddress, amountInWei)
  */
 async function getContractMilestones(contractAddress) {
   return executeWithRetry(async () => {
+    const { provider } = getProviderAndSigner();
+    const code = await provider.getCode(contractAddress);
+
+    if (!code || code === '0x') {
+      const err = new Error(
+        `No contract bytecode found at ${contractAddress}. ` +
+        `Address is stale or RPC_URL points to a different chain.`
+      );
+      err.code = 'NO_CONTRACT_CODE';
+      throw err;
+    }
+
     const contract = getContractInstance(contractAddress);
     const milestones = await contract.getMilestones();
 

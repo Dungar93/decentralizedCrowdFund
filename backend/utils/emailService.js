@@ -1,5 +1,34 @@
 const nodemailer = require('nodemailer');
+const dns = require('dns').promises;
 const logger = require('./logger');
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MX_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const mxCache = new Map();
+
+function isEmailFormatValid(email) {
+  return typeof email === 'string' && EMAIL_REGEX.test(email.trim());
+}
+
+async function hasValidMxRecord(email) {
+  const domain = email.split('@')[1]?.toLowerCase();
+  if (!domain) return false;
+
+  const cached = mxCache.get(domain);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.valid;
+  }
+
+  try {
+    const records = await dns.resolveMx(domain);
+    const valid = Array.isArray(records) && records.length > 0;
+    mxCache.set(domain, { valid, expiresAt: Date.now() + MX_CACHE_TTL_MS });
+    return valid;
+  } catch {
+    mxCache.set(domain, { valid: false, expiresAt: Date.now() + MX_CACHE_TTL_MS });
+    return false;
+  }
+}
 
 // Create transporter
 const createTransporter = () => {
@@ -34,6 +63,23 @@ const transporter = createTransporter();
  */
 const sendEmail = async (options) => {
   const { to, subject, html, text } = options;
+
+  if (!isEmailFormatValid(to)) {
+    const error = `Invalid recipient email format: ${to}`;
+    logger.warn(error);
+    return { success: false, error };
+  }
+
+  // Only perform MX checks when real SMTP delivery is configured.
+  const isRealSmtp = Boolean(process.env.SMTP_USER) && process.env.NODE_ENV !== 'test';
+  if (isRealSmtp) {
+    const hasMx = await hasValidMxRecord(to);
+    if (!hasMx) {
+      const error = `Recipient domain has no MX record (or does not exist): ${to}`;
+      logger.warn(error);
+      return { success: false, error };
+    }
+  }
 
   const mailOptions = {
     from: process.env.SMTP_FROM || 'MedTrustFund <noreply@medtrustfund.org>',

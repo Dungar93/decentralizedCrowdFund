@@ -11,7 +11,9 @@ const UserSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: true,
+    required: function() {
+      return this.authProvider === 'local' || !this.authProvider;
+    },
   },
   name: {
     type: String,
@@ -58,6 +60,13 @@ const UserSchema = new mongoose.Schema({
   passwordResetExpires: { type: Date, select: false },
   walletAuthNonce: { type: String, select: false },
   walletAuthNonceExpires: { type: Date, select: false },
+
+  // Google OAuth fields
+  googleId: { type: String, unique: true, sparse: true, select: false },
+  authProvider: { type: String, enum: ['local', 'google'], default: 'local' },
+  googleAccessToken: { type: String, select: false },
+  googleRefreshToken: { type: String, select: false },
+  googleTokenExpiry: { type: Date, select: false },
 
   preferences: {
     emailNotifications: { type: mongoose.Schema.Types.Mixed, default: undefined },

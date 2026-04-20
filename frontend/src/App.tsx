@@ -27,6 +27,7 @@ import KYCSubmission from './pages/KYCSubmission';
 import AdminCampaignReview from './pages/AdminCampaignReview';
 import AdminKYCReview from './pages/AdminKYCReview';
 import TransactionHistory from './pages/TransactionHistory';
+import AuthCallback from './pages/AuthCallback';
 import './App.css';
 import NearbyHospitals from './pages/NearbyHospitals';
 import { ScrollToTop, BackToTopButton, ToastProvider, RouteProgressBar } from './components/UXEnhancements';
@@ -63,6 +64,7 @@ function App() {
           <Route path="/signup" element={<SignUp />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/campaigns" element={<Campaigns />} />
           <Route path="/eth-converter" element={<EthConverter />} />
           <Route path="/ai-verification" element={<AIVerificationExplainer />} />

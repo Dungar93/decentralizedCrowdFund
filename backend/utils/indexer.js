@@ -41,6 +41,16 @@ async function syncContracts() {
         }
 
       } catch (err) {
+        // If contract does not exist on current RPC network, stop polling it.
+        if (err.code === 'NO_CONTRACT_CODE' || err.code === 'BAD_DATA') {
+          console.warn(
+            `[INDEXER] Contract ${contract.contractAddress} is not deployed on current RPC. ` +
+            `Marking as cancelled to prevent repeated polling.`
+          );
+          await SmartContract.findByIdAndUpdate(contract._id, { status: 'cancelled' });
+          continue;
+        }
+
         console.warn(`[INDEXER] Failed to poll contract ${contract.contractAddress}: ${err.message}`);
       }
     }

@@ -24,6 +24,7 @@ const transactionsRoutes = require("./routes/transactions");
 
 // Import middleware
 const { auditLogMiddleware } = require("./middleware/auth");
+const passport = require("passport");
 
 // Import indexer daemon
 const { startIndexer } = require("./utils/indexer");
@@ -68,6 +69,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(mongoSanitize()); // Prevent NoSQL injection
 app.use(xss()); // Sanitise user input against XSS
 app.use(auditLogMiddleware);
+app.use(passport.initialize());
 
 // Rate limiting — default 500 req / 15 min per IP (override with API_RATE_LIMIT_MAX; disabled in Jest)
 const skipRateLimit =
@@ -94,6 +96,8 @@ mongoose
   .connect(mongoUri)
   .then(() => {
     console.log("✅ MongoDB connected");
+    // Initialize Passport after MongoDB is connected
+    require("./config/passport")(User);
     if (!isTestEnv) {
       startIndexer(30); // Poll every 30 seconds
       startExpiryJob(60); // Check for expired campaigns every 60 minutes

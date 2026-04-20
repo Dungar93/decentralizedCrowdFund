@@ -27,6 +27,7 @@ interface Campaign {
   hospitalId?: {
     hospitalName: string;
     verified: boolean;
+    walletAddress?: string;
   };
   milestones?: Array<{
     description: string;
@@ -50,6 +51,7 @@ interface Donation {
 }
 
 export default function CampaignDetail() {
+  const HARDHAT_CHAIN_ID_HEX = "0x7a69"; // 31337
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [campaign, setCampaign] = useState<Campaign | null>(null);
@@ -70,6 +72,52 @@ export default function CampaignDetail() {
       fetchDonations();
     }
   }, [id]);
+
+  useEffect(() => {
+    if (!(window as any).ethereum) return;
+
+    const syncWallet = async () => {
+      try {
+        const accounts = await (window as any).ethereum.request({ method: "eth_accounts" });
+        if (accounts?.length > 0) {
+          setWalletConnected(true);
+          setWalletAddress(accounts[0]);
+        } else {
+          setWalletConnected(false);
+          setWalletAddress("");
+        }
+      } catch {
+        setWalletConnected(false);
+        setWalletAddress("");
+      }
+    };
+
+    const handleAccountsChanged = (accounts: string[]) => {
+      if (accounts?.length > 0) {
+        setWalletConnected(true);
+        setWalletAddress(accounts[0]);
+        localStorage.setItem("walletAddress", accounts[0]);
+      } else {
+        setWalletConnected(false);
+        setWalletAddress("");
+        localStorage.removeItem("walletAddress");
+      }
+    };
+
+    const handleChainChanged = () => {
+      setActionError("");
+      syncWallet();
+    };
+
+    syncWallet();
+    (window as any).ethereum.on("accountsChanged", handleAccountsChanged);
+    (window as any).ethereum.on("chainChanged", handleChainChanged);
+
+    return () => {
+      (window as any).ethereum.removeListener("accountsChanged", handleAccountsChanged);
+      (window as any).ethereum.removeListener("chainChanged", handleChainChanged);
+    };
+  }, []);
 
   const fetchCampaign = async () => {
     try {
@@ -121,9 +169,57 @@ export default function CampaignDetail() {
       setWalletConnected(true);
       setWalletAddress(accounts[0]);
       localStorage.setItem("walletAddress", accounts[0]);
+
+      // Keep backend user profile wallet in sync with the signer used in MetaMask.
+      try {
+        await api.put("/api/auth/link-wallet", { walletAddress: accounts[0] });
+      } catch (linkErr: any) {
+        console.warn("Wallet link warning:", linkErr?.response?.data || linkErr?.message);
+      }
     } catch (err: any) {
       console.error("Wallet connection error:", err);
       setActionError("Failed to connect wallet");
+    }
+  };
+
+  const switchToHardhatNetwork = async () => {
+    if (!(window as any).ethereum) {
+      setActionError("MetaMask not installed. Please install MetaMask first.");
+      return;
+    }
+
+    try {
+      await (window as any).ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: HARDHAT_CHAIN_ID_HEX }],
+      });
+      setActionError("");
+    } catch (err: any) {
+      // 4902 means chain is not added in MetaMask yet.
+      if (err?.code === 4902) {
+        try {
+          await (window as any).ethereum.request({
+            method: "wallet_addEthereumChain",
+            params: [
+              {
+                chainId: HARDHAT_CHAIN_ID_HEX,
+                chainName: "Hardhat Local 31337",
+                rpcUrls: ["http://127.0.0.1:8545"],
+                nativeCurrency: {
+                  name: "Ethereum",
+                  symbol: "ETH",
+                  decimals: 18,
+                },
+              },
+            ],
+          });
+          setActionError("");
+        } catch (addErr: any) {
+          setActionError(addErr?.message || "Failed to add Hardhat network in MetaMask.");
+        }
+      } else {
+        setActionError(err?.message || "Failed to switch MetaMask network.");
+      }
     }
   };
 
@@ -152,6 +248,18 @@ export default function CampaignDetail() {
       // Donor signs the donation on-chain (non-custodial).
       const provider = new ethers.BrowserProvider((window as any).ethereum);
       const signer = await provider.getSigner();
+      const signerAddress = await signer.getAddress();
+      setWalletConnected(true);
+      setWalletAddress(signerAddress);
+
+      // Ensure backend knows this wallet before tx verification/recording.
+      try {
+        await api.put("/api/auth/link-wallet", { walletAddress: signerAddress });
+      } catch (linkErr: any) {
+        setActionError(linkErr?.response?.data?.error || "Please link your wallet from profile and retry donation.");
+        return;
+      }
+
       const contract = new ethers.Contract(
         campaign.smartContractAddress,
         ["function donate() external payable"],
@@ -159,6 +267,32 @@ export default function CampaignDetail() {
       );
 
       const valueWei = ethers.parseEther(donationAmount.toString());
+
+      // Preflight checks to provide clearer guidance than raw RPC errors.
+      const network = await provider.getNetwork();
+      const codeAtAddress = await provider.getCode(campaign.smartContractAddress);
+      if (!codeAtAddress || codeAtAddress === "0x") {
+        setActionError(
+          `Contract not found on current network (chain ${network.chainId.toString()}). Switch MetaMask to the network where this campaign was deployed.`,
+        );
+        return;
+      }
+
+      const [balanceWei, gasEstimate, feeData] = await Promise.all([
+        provider.getBalance(signerAddress),
+        contract.donate.estimateGas({ value: valueWei }),
+        provider.getFeeData(),
+      ]);
+
+      const gasPriceWei = feeData.gasPrice ?? feeData.maxFeePerGas ?? 0n;
+      const totalRequiredWei = valueWei + gasEstimate * gasPriceWei;
+      if (balanceWei < totalRequiredWei) {
+        setActionError(
+          `Insufficient native ETH for donation + gas on chain ${network.chainId.toString()}. Required ~${ethers.formatEther(totalRequiredWei)} ETH, wallet has ${ethers.formatEther(balanceWei)} ETH.`,
+        );
+        return;
+      }
+
       const tx = await contract.donate({ value: valueWei });
       await tx.wait();
 
@@ -345,9 +479,26 @@ export default function CampaignDetail() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-10 mt-8 relative z-10">
+        {/* Proactive hospital wallet warning */}
+        {campaign.hospitalId && !campaign.hospitalId.walletAddress && !campaign.smartContractAddress && (
+          <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-6 bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
+            <p className="text-amber-300 font-medium text-sm text-center">Hospital wallet address not found. Please assign a verified hospital.</p>
+          </motion.div>
+        )}
         {actionError && (
           <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-6 bg-red-500/10 border border-red-500/30 rounded-xl p-4">
             <p className="text-red-300 font-medium text-sm text-center">{actionError}</p>
+            {actionError.includes("Contract not found on current network") && (
+              <div className="mt-3 flex justify-center">
+                <button
+                  type="button"
+                  onClick={switchToHardhatNetwork}
+                  className="px-4 py-2 text-xs font-semibold rounded-lg border border-amber-400/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20 transition-all"
+                >
+                  Switch MetaMask To Local 31337
+                </button>
+              </div>
+            )}
           </motion.div>
         )}
 
@@ -724,9 +875,11 @@ export default function CampaignDetail() {
                       No milestones on this campaign (common if it was created before milestone fixes). Deploy is blocked until milestones exist — create a new campaign from the patient flow or update this record in the database.
                     </p>
                   )}
-                  {campaign.milestones && campaign.milestones.length > 0 && !campaign.hospitalId && (
+                  {campaign.milestones && campaign.milestones.length > 0 && (!campaign.hospitalId || !campaign.hospitalId.walletAddress) && (
                     <p className="text-xs text-amber-200/90 text-left mb-3 leading-relaxed">
-                      Assign a verified hospital (with a wallet on their profile) before deploying escrow — the contract needs a hospital address.
+                      {!campaign.hospitalId
+                        ? "Assign a verified hospital (with a wallet on their profile) before deploying escrow — the contract needs a hospital address."
+                        : "The assigned hospital has no wallet address saved. The hospital must save an ETH wallet on their profile before the contract can be deployed."}
                     </p>
                   )}
                     <motion.button
@@ -736,7 +889,8 @@ export default function CampaignDetail() {
                       disabled={
                         deployingContract ||
                         !campaign.milestones?.length ||
-                        !campaign.hospitalId
+                        !campaign.hospitalId ||
+                        !campaign.hospitalId?.walletAddress
                       }
                       className="w-full px-4 py-3 bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:from-emerald-500 hover:to-teal-500 text-emerald-300 hover:text-white border border-emerald-500/30 font-semibold rounded-xl transition-all shadow-[0_0_15px_rgba(16,185,129,0.2)] flex items-center justify-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                     >

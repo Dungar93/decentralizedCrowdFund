@@ -51,12 +51,12 @@ describe('Login Page', () => {
     renderLogin();
     expect(screen.getByPlaceholderText(/you@example\.com/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/••••••••/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sign In' })).toBeInTheDocument();
   });
 
   it('renders the MedTrustFund heading', () => {
     renderLogin();
-    expect(screen.getByText('MedTrustFund')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'MedTrustFund' })).toBeInTheDocument();
   });
 
   it('renders a link to sign-up page', () => {
@@ -84,7 +84,7 @@ describe('Login Page', () => {
     fireEvent.change(screen.getByPlaceholderText(/••••••••/i), {
       target: { value: 'password123' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
 
     await waitFor(() => {
       expect(mockLogin).toHaveBeenCalledWith('admin@test.com', 'password123');
@@ -101,7 +101,7 @@ describe('Login Page', () => {
     fireEvent.change(screen.getByPlaceholderText(/••••••••/i), {
       target: { value: 'pass' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
 
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/dashboard');
@@ -118,7 +118,7 @@ describe('Login Page', () => {
     fireEvent.change(screen.getByPlaceholderText(/••••••••/i), {
       target: { value: 'wrongpass' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
 
     await waitFor(() => {
       expect(screen.getByText(/invalid credentials/i)).toBeInTheDocument();
@@ -137,7 +137,7 @@ describe('Login Page', () => {
     fireEvent.change(screen.getByPlaceholderText(/••••••••/i), {
       target: { value: 'pass' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
 
     await waitFor(() => {
       expect(screen.getByText(/signing in/i)).toBeInTheDocument();

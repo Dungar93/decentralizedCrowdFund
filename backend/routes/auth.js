@@ -1,5 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
+const passport = require('passport');
 const User = require('../models/User');
 const { generateToken } = require('../utils/jwtUtils');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth');
@@ -573,5 +574,114 @@ router.get('/preferences', authMiddleware, async (req, res) => {
     res.status(500).json({ error: `Failed to fetch preferences: ${error.message}` });
   }
 });
+
+// @route   GET /api/auth/google
+// @desc    Initiate Google OAuth flow
+// @access  Public
+router.get('/google',
+  passport.authenticate('google', {
+    scope: ['profile', 'email'],
+    session: false,
+  })
+);
+
+// @route   GET /api/auth/google/callback
+// @desc    Google OAuth callback handler
+// @access  Public
+router.get('/google/callback',
+  passport.authenticate('google', {
+    session: false,
+    failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=google_auth_failed`,
+  }),
+  async (req, res) => {
+    try {
+      // Generate JWT token for the authenticated user
+      const token = generateToken(req.user._id, req.user.email, req.user.role);
+
+      // Create audit log
+      await AuditLog.create({
+        userId: req.user._id,
+        action: 'user_login',
+        entityType: 'user',
+        entityId: req.user._id,
+        details: { method: 'google', googleId: req.user.googleId },
+        ipAddress: req.ip,
+        status: 'success',
+      }).catch(() => {});
+
+      // Redirect to frontend with token
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      res.redirect(`${frontendUrl}/auth/callback?token=${encodeURIComponent(token)}&user=${encodeURIComponent(JSON.stringify({
+        id: req.user._id,
+        email: req.user.email,
+        name: req.user.name,
+        role: req.user.role,
+        walletAddress: req.user.walletAddress,
+        verified: verifiedForClient(req.user),
+      }))}`);
+    } catch (error) {
+      console.error('Google OAuth callback error:', error);
+      res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=auth_callback_failed`);
+    }
+  }
+);
+
+// @route   GET /api/auth/google-mobile
+// @desc    Google OAuth for popup window - returns HTML that sends token to opener
+// @access  Public
+router.get('/google-mobile',
+  passport.authenticate('google', { scope: ['profile', 'email'], session: false }),
+  async (req, res) => {
+    try {
+      const token = generateToken(req.user._id, req.user.email, req.user.role);
+      const user = {
+        id: req.user._id,
+        email: req.user.email,
+        name: req.user.name,
+        role: req.user.role,
+        walletAddress: req.user.walletAddress,
+        verified: verifiedForClient(req.user),
+      };
+
+      await AuditLog.create({
+        userId: req.user._id,
+        action: 'user_login',
+        entityType: 'user',
+        entityId: req.user._id,
+        details: { method: 'google', googleId: req.user.googleId },
+        ipAddress: req.ip,
+        status: 'success',
+      }).catch(() => {});
+
+      // Send HTML page that posts message to opener and closes
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+          <head><title>Authenticating...</title></head>
+          <body>
+            <script>
+              (function() {
+                try {
+                  const token = '${token}';
+                  const user = ${JSON.stringify(user)};
+                  if (window.opener && !window.opener.closed) {
+                    window.opener.postMessage({ type: 'google-auth-success', token, user }, window.location.origin);
+                  }
+                  window.close();
+                } catch (e) {
+                  window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=auth_failed';
+                }
+              })();
+            </script>
+            <p>Completing login...</p>
+          </body>
+        </html>
+      `);
+    } catch (error) {
+      console.error('Google mobile auth error:', error);
+      res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=auth_failed`);
+    }
+  }
+);
 
 module.exports = router;
