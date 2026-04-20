@@ -4,7 +4,6 @@ import { motion } from 'framer-motion';
 import { FiMail, FiLock } from 'react-icons/fi';
 import ThemeToggle from '../components/ui/ThemeToggle';
 import { useAuth } from '../contexts/AuthContext';
-import api from '../utils/api';
 
 export default function Login() {
   const navigate = useNavigate();
